@@ -1,8 +1,7 @@
-# render.yaml (Attempt with minimal pserv)
+# render.yaml (Attempt with explicit engine in pserv)
 services:
   - type: web
     name: art-gallery-demo # << YOUR UNIQUE APP NAME
-    # ... (rest of web service definition is THE SAME as Option 1) ...
     env: python
     region: frankfurt
     plan: free
@@ -28,8 +27,7 @@ services:
 
   - type: pserv # PostgreSQL Database service
     name: artgallerydb # Name of your database service
-    region: frankfurt # Optional, but good to co-locate
-    plan: free # This is key for Render to know it's a free tier DB
-    # No other properties like 'engine' or specific postgresqlVersion.
-    # Render should infer it's a PostgreSQL database from the 'plan'
-    # and the fact that the web service is trying to connect to it for a DATABASE_URL.
+    region: frankfurt
+    plan: free
+    engine: postgresql # <<<< ADDING THIS EXPLICITLY
+    # postgresqlVersion: "15" # Optional: if you want to pin a specific version
