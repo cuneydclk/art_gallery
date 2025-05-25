@@ -1,0 +1,35 @@
+<!-- artworks/templates/artworks/transaction_status.html -->
+{% extends "base.html" %}
+
+{% block page_title %}{{ page_title }}{% endblock page_title %}
+
+{% block content %}
+<h1>Transaction Status: {{ transaction.artwork.title }}</h1>
+
+<p><strong>Artwork:</strong> {{ transaction.artwork.title }}</p>
+<p><strong>Price:</strong> ${{ transaction.final_price }}</p>
+<p><strong>Transaction ID:</strong> {{ transaction.id }}</p>
+<p><strong>Current Status:</strong> <strong style="color: {% if transaction.status == 'approved' %}green{% elif transaction.status == 'rejected' %}red{% else %}orange{% endif %};">{{ transaction.get_status_display }}</strong></p>
+
+{% if transaction.status == 'pending_approval' %}
+    <p>Your dekont has been uploaded successfully. We are currently reviewing your payment. This may take up to 1-2 business days (or specify your timeframe, e.g., "a few hours").</p>
+    <p>You will be notified once the transaction is approved.</p>
+{% elif transaction.status == 'approved' %}
+    <p style="color: green; font-weight: bold;">Congratulations! Your purchase has been approved. You are now the owner of this artwork.</p>
+    <p><a href="{% url 'artworks:my_art' %}">View your artworks</a>.</p>
+{% elif transaction.status == 'rejected' %}
+    <p style="color: red;">Unfortunately, your transaction was rejected.</p>
+    {% if transaction.admin_remarks %}
+        <p><strong>Reason:</strong> {{ transaction.admin_remarks }}</p>
+    {% endif %}
+    <p>Please contact us at {{ gallery_settings.contact_phone|default:"our gallery contact" }} for more information.</p>
+     <p><a href="{% url 'artworks:payment_and_dekont_upload' transaction.id %}">Re-upload Dekont or Check Payment Info</a></p>
+{% elif transaction.status == 'pending_payment' %}
+    <p>Your purchase is initiated. Please proceed with payment and <a href="{% url 'artworks:payment_and_dekont_upload' transaction.id %}">upload your dekont</a>.</p>
+{% endif %}
+
+<p style="margin-top: 20px;"><a href="{% url 'artworks:artwork_detail' transaction.artwork.slug %}">Back to Artwork</a></p>
+{% if user.is_authenticated %}
+    {# <p><a href="{% url 'user_transaction_history' %}">View All My Transactions</a></p> #} {# For later #}
+{% endif %}
+{% endblock content %}

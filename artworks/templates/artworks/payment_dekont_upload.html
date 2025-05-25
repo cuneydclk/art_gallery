@@ -1,0 +1,40 @@
+<!-- artworks/templates/artworks/payment_dekont_upload.html -->
+{% extends "base.html" %}
+
+{% block page_title %}{{ page_title }}{% endblock page_title %}
+
+{% block content %}
+<h1>Payment for: {{ artwork.title }}</h1>
+<p><strong>Price: ${{ transaction.final_price }}</strong></p>
+<hr>
+
+<h2>Payment Instructions</h2>
+<p>Please transfer the total amount to the following bank account:</p>
+<ul>
+    <li><strong>IBAN:</strong> {{ gallery_settings.bank_account_iban }}</li>
+    <li><strong>Account Holder:</strong> {{ gallery_settings.bank_account_holder }}</li>
+</ul>
+<p><strong>Important:</strong> Please include the transaction ID <strong>{{ transaction.id }}</strong> or artwork title <strong>"{{ artwork.title }}"</strong> in your payment reference/description.</p>
+{% if gallery_settings.payment_instructions %}
+    <p><strong>Additional Instructions:</strong><br>{{ gallery_settings.payment_instructions|linebreaks }}</p>
+{% endif %}
+<p><strong>Contact:</strong> {{ gallery_settings.contact_phone }} if you have any questions.</p>
+<hr>
+
+{% if transaction.status == 'pending_payment' or transaction.status == 'pending_approval' %}
+    <h2>Upload Dekont (Proof of Payment)</h2>
+    {% if transaction.dekont_image %}
+        <p style="color: green;">You have already uploaded a dekont. You can upload a new one to replace it if needed.</p>
+        <p><a href="{{ transaction.dekont_image.url }}" target="_blank">View Current Dekont</a></p>
+    {% endif %}
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit">Upload Dekont</button>
+    </form>
+{% else %}
+    <p>Dekont has been processed for this transaction. Current status: <strong>{{ transaction.get_status_display }}</strong></p>
+{% endif %}
+
+<p style="margin-top: 20px;"><a href="{% url 'artworks:artwork_detail' artwork.slug %}">Back to Artwork</a></p>
+{% endblock content %}

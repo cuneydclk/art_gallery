@@ -1,0 +1,34 @@
+<!-- artworks/templates/artworks/my_art.html -->
+{% extends "base.html" %}
+
+{% block page_title %}My Art - My Gallery{% endblock page_title %}
+
+{% block content %}
+    <h1>My Art</h1>
+
+    {% if owned_artworks %}
+        <div class="gallery-container">
+            {% for art in owned_artworks %}
+                <div class="artwork-card">
+                    <a href="{% url 'artworks:artwork_detail' art.slug %}">
+                        {% if art.image_placeholder_url %}
+                            <img src="{{ art.image_placeholder_url }}" alt="{{ art.title }} placeholder">
+                        {% else %}
+                            <img src="https://via.placeholder.com/300x200.png?text=No+Image" alt="No image available">
+                        {% endif %}
+                        <h2>{{ art.title }}</h2>
+                        {% if art.is_for_sale_direct and art.direct_sale_price %}
+                            <p><strong>Price: ${{ art.direct_sale_price }}</strong></p>
+                        {% elif art.is_for_auction %}
+                            <p><strong>Auction Active</strong></p>
+                        {% else %}
+                            <p>Not currently for sale.</p>
+                        {% endif %}
+                    </a>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p>You currently own no artworks.</p>
+    {% endif %}
+{% endblock content %}

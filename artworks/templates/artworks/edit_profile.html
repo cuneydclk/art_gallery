@@ -1,0 +1,16 @@
+<!-- artworks/templates/artworks/edit_profile.html -->
+{% extends "base.html" %}
+
+{% block page_title %}{{ page_title }}{% endblock page_title %}
+
+{% block content %}
+<h1>{{ page_title }}</h1>
+<p>Please provide your bank details so we can transfer funds to you when your art is sold.</p>
+<form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Save Profile</button>
+</form>
+
+<p style="margin-top:20px;"><a href="{% url 'artworks:my_art' %}">Back to My Art</a></p>
+{% endblock content %}

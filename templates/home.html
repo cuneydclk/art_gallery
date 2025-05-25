@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block page_title %}Welcome - My Gallery{% endblock page_title %}
+
+{% block content %}
+<h1>Welcome to My Art Gallery!</h1>
+<p>Discover unique artworks available for direct purchase or auction.</p>
+<p><a href="{% url 'artworks:artwork_list' %}" class="button">Browse Gallery</a></p>
+{% if not user.is_authenticated %}
+<p>Ready to join? <a href="{% url 'signup' %}">Sign Up</a> or <a href="{% url 'login' %}">Login</a>.</p>
+{% endif %}
+<style>
+    .button {
+        display: inline-block;
+        padding: 10px 20px;
+        background-color: #007bff;
+        color: white;
+        text-decoration: none;
+        border-radius: 5px;
+        margin-top: 10px;
+    }
+    .button:hover {
+        background-color: #0056b3;
+    }
+</style>
+{% endblock content %}

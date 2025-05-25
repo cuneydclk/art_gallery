@@ -1,0 +1,37 @@
+<!-- templates/registration/signup.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ page_title }} - My Gallery</title>
+    <style>
+        /* You can reuse or adapt styles from login.html or create a base CSS file */
+        body { font-family: sans-serif; margin: 40px; background-color: #f9f9f9; display: flex; justify-content: center; align-items: center; min-height: 80vh; }
+        .signup-container { background-color: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); width: 360px; }
+        .signup-container h2 { text-align: center; margin-bottom: 20px; color: #333; }
+        .signup-container form ul { list-style-type: none; padding: 0; } /* For error lists */
+        .signup-container form li { margin-bottom: 5px; color: red; font-size: 0.9em; }
+        .signup-container form p { margin-bottom: 15px; }
+        .signup-container label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
+        .signup-container input[type="text"],
+        .signup-container input[type="password"] { width: calc(100% - 22px); padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;}
+        .signup-container .helptext { font-size: 0.8em; color: #777; margin-top: 5px; display: block; }
+        .signup-container button { background-color: #28a745; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; width: 100%; font-size: 16px; }
+        .signup-container button:hover { background-color: #218838; }
+        .signup-container .login-link { text-align: center; margin-top: 20px; font-size: 0.9em; }
+        .signup-container .login-link a { color: #007bff; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="signup-container">
+        <h2>{{ page_title }}</h2>
+        <form method="post">
+            {% csrf_token %}
+            {{ form.as_p }} {# Renders the form fields as paragraphs. You can customize rendering. #}
+            <button type="submit">Sign Up</button>
+        </form>
+        <p class="login-link">Already have an account? <a href="{% url 'login' %}">Login</a></p>
+        <p class="login-link" style="margin-top: 10px;"><a href="{% url 'artworks:artwork_list' %}">Back to Gallery</a></p>
+    </div>
+</body>
+</html>
