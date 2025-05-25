@@ -1,7 +1,8 @@
-# render.yaml
+# render.yaml (Attempt with minimal pserv)
 services:
   - type: web
     name: art-gallery-demo # << YOUR UNIQUE APP NAME
+    # ... (rest of web service definition is THE SAME as Option 1) ...
     env: python
     region: frankfurt
     plan: free
@@ -19,18 +20,16 @@ services:
         generateValue: true
       - key: DJANGO_DEBUG
         value: False
-      - key: DATABASE_URL # Explicitly define that this web service needs a DB connection
+      - key: DATABASE_URL
         fromDatabase:
-          name: artgallerydb # This MUST match the name of your database pserv below
-          property: connectionString # Tells Render to inject the connection string
+          name: artgallerydb # Must match the database service name below
+          property: connectionString
       # DJANGO_ALLOWED_HOSTS and DJANGO_CSRF_TRUSTED_ORIGINS will be set in Render Dashboard UI
 
   - type: pserv # PostgreSQL Database service
     name: artgallerydb # Name of your database service
-    region: frankfurt
-    plan: free
-    # For a pserv that is a database, Render infers its nature based on the plan
-    # and how other services (like 'web') connect to it using 'fromDatabase'.
-    # You can optionally specify the engine version if needed:
-    # postgresqlVersion: "15" 
-    # No 'runtime' or 'startCommand' is needed here.
+    region: frankfurt # Optional, but good to co-locate
+    plan: free # This is key for Render to know it's a free tier DB
+    # No other properties like 'engine' or specific postgresqlVersion.
+    # Render should infer it's a PostgreSQL database from the 'plan'
+    # and the fact that the web service is trying to connect to it for a DATABASE_URL.
