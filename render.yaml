@@ -3,15 +3,15 @@ services:
   - type: web
     name: art-gallery-demo # << YOUR UNIQUE APP NAME
     env: python
-    region: frankfurt 
+    region: frankfurt
     plan: free
     buildCommand: |
       pip install --upgrade pip
       pip install -r requirements.txt
-      python manage.py collectstatic --no-input --clear 
+      python manage.py collectstatic --no-input --clear
       python manage.py migrate
     startCommand: gunicorn gallery_config.wsgi:application --workers 2 --threads 2 --timeout 120
-    healthCheckPath: / # Optional, helps Render know your app is up
+    healthCheckPath: /
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.5 # << YOUR PYTHON VERSION
@@ -19,18 +19,20 @@ services:
         generateValue: true
       - key: DJANGO_DEBUG
         value: False
-      - key: WEB_CONCURRENCY
-        value: 2 
-      - key: DATABASE_URL
-        fromDatabase:
-          name: artgallerydb # This name must match the database service name below
-          property: connectionString
-      # DJANGO_ALLOWED_HOSTS and DJANGO_CSRF_TRUSTED_ORIGINS will be set in Render Dashboard UI
+      # DATABASE_URL will be automatically injected by Render
+      # because we are connecting the web service to the database service below.
+      # We achieve this by making sure the `fromDatabase.name` in an (optional)
+      # explicit DATABASE_URL entry for the web service matches the `name` of the database service,
+      # OR Render automatically links services if one is clearly a web app and the other a DB.
+      # Let's rely on Render's automatic linking for now, but if issues persist, we'll add it.
 
-  - type: pserv # PostgreSQL Database service
-    name: artgallerydb # Name of your database service
-    region: frankfurt 
+  - type: pserv # This still signifies a private service
+    name: artgallerydb # Name for your database service within Render
+    region: frankfurt
     plan: free
-    # Render will create a PostgreSQL database for you on the free plan.
-    # You can specify postgresqlVersion if needed, e.g.
-    # postgresqlVersion: '15'
+    # Use the 'database' key for explicit database configuration for pserv
+    database:
+      name: artgallery_dbname # This is the actual database *name* inside PostgreSQL
+      engine: postgresql # Specifies the database engine
+      # user: artgallery_user # Optional: Render generates a user if not specified
+      # version: "15" # Optional: specify PostgreSQL version
