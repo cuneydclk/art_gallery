@@ -1,0 +1,34 @@
+# render.yaml
+services:
+  - type: web # Django application service
+    name: art-gallery-demo # << CHOOSE YOUR UNIQUE APP NAME HERE
+    env: python
+    region: frankfurt # Optional: choose a region e.g., oregon, frankfurt, singapore
+    plan: free # Use the free tier for the web service
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      python manage.py collectstatic --no-input
+      python manage.py migrate
+    startCommand: gunicorn gallery_config.wsgi:application --workers 2 --threads 2 --timeout 120
+    healthCheckPath: / # Optional: Render pings this path to check if your app is healthy
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.5 # << SET YOUR PYTHON VERSION (match your local if possible)
+      - key: DJANGO_SECRET_KEY
+        generateValue: true # Render will generate a secure secret key
+      - key: DJANGO_DEBUG
+        value: False # Production should always be False
+      - key: WEB_CONCURRENCY # For Gunicorn, often set by Render automatically based on plan
+        value: 2 # Example, can adjust
+      # DATABASE_URL is automatically injected by Render when connected to the database service
+      # ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS will be set via Render dashboard or this file later if needed
+
+  - type: pserv # PostgreSQL Database service (pserv stands for private service)
+    name: artgallerydb # << CHOOSE A NAME FOR YOUR DATABASE
+    env: postgres
+    region: frankfurt # Optional: keep it same as your web service region
+    plan: free # Use the free tier for the database
+    # postgresqlVersion: '15' # Optional: specify PostgreSQL version
+    # disk:
+    #   sizeGB: 1 # Default for free tier is 1GB

@@ -1,18 +1,19 @@
-# Django
-*.pyc
+# Python
 __pycache__/
-db.sqlite3
-/static/
-/media/
-/.env
-.env.*
+*.pyc
+*.pyo
+*.pyd
+venv/
+env/
+.env
 
-# VSCode or other editors
+# Django
+db.sqlite3
+staticfiles/
+media/ # If you don't want to commit example media locally, but be careful if you rely on them
+*.log
+
+# IDE / OS
 .vscode/
 .idea/
-
-# OS files
-.DS_Store
-
-# Virtual environment
-venv/
+*.DS_Store
