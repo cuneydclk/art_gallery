@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'whitenoise.runserver_nostatic', # Add whitenoise for static files (before staticfiles)
     'django.contrib.staticfiles',
+    'django.contrib.humanize',
     'artworks',
     # Add other apps if you created them (e.g., 'users', 'core')
 ]

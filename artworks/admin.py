@@ -2,15 +2,45 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
-from .models import Artwork, Comment, Transaction, GallerySetting, UserProfile
-from django.utils.html import format_html # For displaying image in admin
+# Ensure all new models are imported
+from .models import (Artwork, Comment, Transaction, GallerySetting, UserProfile, 
+                     AuctionRegistration, Bid) # Added AuctionRegistration, Bid
+from django.utils.html import format_html
 from django.utils import timezone
+from django.contrib import messages
+
 
 class ArtworkAdmin(admin.ModelAdmin):
-    list_display = ('title', 'slug', 'current_owner', 'is_for_sale_direct', 'direct_sale_price', 'is_for_auction', 'created_at')
-    list_filter = ('is_for_sale_direct', 'is_for_auction', 'current_owner')
+    list_display = (
+        'title', 'slug', 'current_owner', 
+        'is_for_sale_direct', 'direct_sale_price', 
+        'is_for_auction', 'auction_status', 'auction_start_time', 
+        'created_at'
+    )
+    list_filter = ('is_for_sale_direct', 'is_for_auction', 'auction_status', 'current_owner')
     search_fields = ('title', 'description', 'slug')
-    prepopulated_fields = {'slug': ('title',)} # Auto-fills slug from title in admin form (client-side)
+    prepopulated_fields = {'slug': ('title',)}
+    
+    fieldsets = (
+        (None, {'fields': ('title', 'slug', 'description', 'image_placeholder_url', 'current_owner')}),
+        ('Direct Sale', {'fields': ('is_for_sale_direct', 'direct_sale_price'), 'classes': ('collapse',)}),
+        ('Auction Settings', {'fields': (
+            'is_for_auction', 'auction_status', 
+            'auction_start_time', 'auction_scheduled_end_time', 'auction_minimum_bid',
+            'auction_signup_offset_minutes', 'auction_signup_deadline', # deadline is editable=False but good to see
+        ), 'classes': ('collapse',)}),
+        ('Auction Runtime/Outcome (System Managed)', {'fields': (
+            'auction_current_highest_bid', 'auction_current_highest_bidder', 
+            'last_bid_time', 'auction_winner', 'auction_winning_price'
+        ), 'classes': ('collapse',)}),
+    )
+    # Fields that are calculated or set by the system should be read-only in admin forms
+    readonly_fields = (
+        'auction_signup_deadline', 
+        'auction_current_highest_bid', 'auction_current_highest_bidder', 
+        'last_bid_time', 'auction_winner', 'auction_winning_price'
+    )
+
 
 class CommentAdmin(admin.ModelAdmin):
     list_display = ('artwork', 'get_commenter_name', 'text_content_preview', 'created_at')
@@ -21,14 +51,14 @@ class CommentAdmin(admin.ModelAdmin):
         if obj.user:
             return obj.user.username
         return obj.guest_name or "Anonymous"
-    get_commenter_name.short_description = 'Commenter' # Column header
+    get_commenter_name.short_description = 'Commenter'
 
     def text_content_preview(self, obj):
         return (obj.text_content[:75] + '...') if len(obj.text_content) > 75 else obj.text_content
     text_content_preview.short_description = 'Comment Preview'
 
 class TransactionAdmin(admin.ModelAdmin):
-    list_display = ('artwork_title', 'buyer_username', 'seller_username', 'final_price', 'status', 'initiated_at', 'dekont_preview')
+    list_display = ('artwork_title', 'buyer_username', 'seller_username', 'final_price', 'sale_type', 'status', 'initiated_at', 'dekont_preview') # Added sale_type
     list_filter = ('status', 'sale_type', 'initiated_at')
     search_fields = ('artwork__title', 'buyer__username', 'seller__username')
     readonly_fields = ('initiated_at', 'dekont_uploaded_at', 'admin_action_at', 'dekont_image_display', 'seller')
@@ -71,29 +101,40 @@ class TransactionAdmin(admin.ModelAdmin):
 
         if obj.status == 'approved' and original_status != 'approved':
             artwork = obj.artwork
-            if artwork.current_owner != obj.buyer:
+            if artwork.current_owner != obj.buyer and obj.buyer: # Ensure buyer is set
                 artwork.current_owner = obj.buyer
+                # Reset sale flags
                 artwork.is_for_sale_direct = False
                 artwork.direct_sale_price = None
-                artwork.is_for_auction = False
+                
+                if obj.sale_type == 'auction_win':
+                    artwork.is_for_auction = False 
+                    artwork.auction_status = 'completed' # Mark auction as completed
+                    # auction_winner and auction_winning_price should have been set on the Artwork
+                    # when the auction ended and transaction was created.
+                    # No need to set them here again directly from transaction.
+                
                 artwork.save()
             
             if not obj.admin_action_at:
                 obj.admin_action_at = timezone.now()
                 obj.save(update_fields=['admin_action_at'])
-            # self.message_user(request, f"Transaction for '{artwork.title}' approved via form save and ownership transferred.", level=messages.SUCCESS)
 
 
     def approve_transactions(self, request, queryset):
         approved_count = 0
         for transaction in queryset:
-            if transaction.status == 'pending_approval':
+            if transaction.status == 'pending_approval' and transaction.buyer: # Ensure buyer is set
                 artwork = transaction.artwork
                 if artwork.current_owner != transaction.buyer:
                     artwork.current_owner = transaction.buyer
                     artwork.is_for_sale_direct = False
                     artwork.direct_sale_price = None
-                    artwork.is_for_auction = False
+
+                    if transaction.sale_type == 'auction_win':
+                        artwork.is_for_auction = False
+                        artwork.auction_status = 'completed'
+                    
                     artwork.save()
 
                 transaction.status = 'approved'
@@ -103,7 +144,7 @@ class TransactionAdmin(admin.ModelAdmin):
         if approved_count > 0:
             self.message_user(request, f"{approved_count} transactions approved and ownerships transferred.")
         else:
-            self.message_user(request, "No transactions were in 'pending_approval' state to approve.", level=messages.WARNING)
+            self.message_user(request, "No transactions were in 'pending_approval' state or had a buyer to approve.", level=messages.WARNING)
     approve_transactions.short_description = "Approve selected transactions"
 
     def reject_transactions(self, request, queryset):
@@ -113,6 +154,16 @@ class TransactionAdmin(admin.ModelAdmin):
                 transaction.status = 'rejected'
                 transaction.admin_action_at = timezone.now()
                 transaction.save()
+
+                # If an auction payment is rejected
+                if transaction.sale_type == 'auction_win':
+                    artwork = transaction.artwork
+                    artwork.auction_status = 'failed_payment'
+                    # Potentially reset auction_winner if you want the slot open for a second chance offer later
+                    # artwork.auction_winner = None 
+                    # artwork.auction_winning_price = None
+                    artwork.save(update_fields=['auction_status']) # Only update auction_status
+
                 updated_count +=1
         if updated_count > 0:
             self.message_user(request, f"{updated_count} transactions rejected.")
@@ -131,11 +182,42 @@ class UserProfileInline(admin.StackedInline):
 class UserAdmin(BaseUserAdmin):
     inlines = (UserProfileInline,)
 
+# --- ADMIN REGISTRATIONS FOR NEW MODELS ---
+@admin.register(AuctionRegistration)
+class AuctionRegistrationAdmin(admin.ModelAdmin):
+    list_display = ('artwork', 'user', 'status', 'registered_at', 'owner_reviewed_at')
+    list_filter = ('status', 'artwork__title', 'user__username', 'artwork__auction_status')
+    search_fields = ('artwork__title', 'user__username')
+    readonly_fields = ('registered_at', 'owner_reviewed_at') # owner_reviewed_at set by actions
+    # Allow admin to change status via list_editable or actions
+    list_editable = ('status',) 
+    actions = ['approve_registrations', 'reject_registrations']
+
+    def approve_registrations(self, request, queryset):
+        updated_count = queryset.update(status='approved', owner_reviewed_at=timezone.now())
+        self.message_user(request, f'{updated_count} registrations approved.')
+    approve_registrations.short_description = "Approve selected registrations"
+
+    def reject_registrations(self, request, queryset):
+        updated_count = queryset.update(status='rejected', owner_reviewed_at=timezone.now())
+        self.message_user(request, f'{updated_count} registrations rejected.')
+    reject_registrations.short_description = "Reject selected registrations"
+
+
+@admin.register(Bid)
+class BidAdmin(admin.ModelAdmin):
+    list_display = ('artwork', 'bidder', 'amount', 'timestamp')
+    list_filter = ('artwork__title', 'bidder__username', 'timestamp')
+    search_fields = ('artwork__title', 'bidder__username')
+    readonly_fields = ('timestamp',)
+
+
 admin.site.unregister(User)
 admin.site.register(User, UserAdmin)
 
 admin.site.register(Artwork, ArtworkAdmin)
 admin.site.register(Comment, CommentAdmin)
-admin.site.register(Transaction, TransactionAdmin) # Make sure this line is present
+admin.site.register(Transaction, TransactionAdmin)
 admin.site.register(GallerySetting)
-admin.site.register(UserProfile) # Optional, if you want a separate UserProfile list
+admin.site.register(UserProfile)
+# AuctionRegistration and Bid are registered using @admin.register decorator above

@@ -1,0 +1,137 @@
+<!-- artworks/templates/artworks/available_auctions.html -->
+{% extends "base.html" %}
+{% load static %} <!-- If you use any static files specific to this template -->
+{% load humanize %} <!-- For formatting timedelta nicely, e.g., "2 hours, 30 minutes" -->
+
+{% block page_title %}{{ page_title }} - My Gallery{% endblock page_title %}
+
+{% block extra_head %}
+{% load artwork_extras %}
+<style>
+    .auction-list-container { margin-top: 20px; }
+    .auction-item {
+        border: 1px solid #ddd;
+        padding: 15px;
+        margin-bottom: 15px;
+        border-radius: 5px;
+        background-color: #fff;
+        display: flex; /* Use flexbox for layout */
+        gap: 20px; /* Space between image and text */
+    }
+    .auction-item-image img {
+        max-width: 150px; /* Limit image width */
+        height: auto;
+        max-height: 150px; /* Limit image height */
+        object-fit: cover;
+        border-radius: 4px;
+    }
+    .auction-item-details { flex-grow: 1; /* Allow details to take remaining space */ }
+    .auction-item h3 { margin-top: 0; }
+    .auction-item h3 a { text-decoration: none; color: #333; }
+    .auction-item h3 a:hover { color: #007bff; }
+    .auction-meta p { margin: 5px 0; font-size: 0.9em; }
+    .auction-status { font-weight: bold; }
+    .status-pending { color: #ffc107; } /* Yellowish for pending */
+    .status-approved { color: #28a745; } /* Green for approved */
+    .status-rejected { color: #dc3545; } /* Red for rejected */
+    .status-live { color: #007bff; } /* Blue for live */
+    .status-signup_open { color: #17a2b8; } /* Teal for signup open */
+    .btn-register, .btn-view-auction {
+        display: inline-block;
+        padding: 8px 12px;
+        margin-top: 10px;
+        text-decoration: none;
+        border-radius: 4px;
+        font-size: 0.9em;
+    }
+    .btn-register { background-color: #28a745; color: white; }
+    .btn-register:hover { background-color: #218838; }
+    .btn-view-auction { background-color: #007bff; color: white; }
+    .btn-view-auction:hover { background-color: #0056b3; }
+    .btn-disabled { background-color: #6c757d; color: white; cursor: not-allowed; }
+
+</style>
+{% endblock extra_head %}
+
+{% block content %}
+    <h1>{{ page_title }}</h1>
+
+    {% if auctions_data %}
+        <div class="auction-list-container">
+            {% for item in auctions_data %}
+                <div class="auction-item">
+                    <div class="auction-item-image">
+                        <a href="{% url 'artworks:artwork_detail' item.artwork.slug %}">
+                            {% if item.artwork.image_placeholder_url %}
+                                <img src="{{ item.artwork.image_placeholder_url }}" alt="{{ item.artwork.title }}">
+                            {% else %}
+                                <img src="https://via.placeholder.com/150.png?text=No+Image" alt="No image available">
+                            {% endif %}
+                        </a>
+                    </div>
+                    <div class="auction-item-details">
+                        <h3><a href="{% url 'artworks:artwork_detail' item.artwork.slug %}">{{ item.artwork.title }}</a></h3>
+                        <div class="auction-meta">
+                            <p><strong>Owner:</strong> {{ item.artwork.current_owner.username|default:"Gallery" }}</p>
+                            <p>
+                                <strong>Auction Status:</strong> 
+                                <span class="auction-status status-{{ item.artwork.auction_status }}">
+                                    {{ item.current_status_display }}
+                                </span>
+                            </p>
+                            {% if item.artwork.auction_start_time %}
+                                <p><strong>Starts:</strong> {{ item.artwork.auction_start_time|date:"F j, Y, P T" }}
+                                {% if item.time_until_start %}
+                                    (in {{ item.time_until_start|humanize_timedelta }})
+                                {% endif %}
+                                </p>
+                            {% endif %}
+                            {% if item.artwork.auction_status == 'signup_open' and item.artwork.auction_signup_deadline %}
+                                <p><strong>Sign-up Closes:</strong> {{ item.artwork.auction_signup_deadline|date:"F j, Y, P T" }}
+                                {% if item.time_until_signup_deadline %}
+                                    (in {{ item.time_until_signup_deadline|humanize_timedelta }})
+                                {% endif %}
+                                </p>
+                            {% endif %}
+                             {% if item.artwork.auction_minimum_bid %}
+                                <p><strong>Minimum Bid:</strong> ${{ item.artwork.auction_minimum_bid }}</p>
+                            {% endif %}
+                        </div>
+
+                        {% if user.is_authenticated %}
+                            <div class="user-auction-interaction" style="margin-top:10px;">
+                                {% if item.user_registration_status %}
+                                    <p>
+                                        <strong>Your Status:</strong>
+                                        <span class="auction-status 
+                                            {% if item.registration.status == 'pending' %}status-pending{% endif %}
+                                            {% if item.registration.status == 'approved' %}status-approved{% endif %}
+                                            {% if item.registration.status == 'rejected' %}status-rejected{% endif %}
+                                        ">{{ item.user_registration_status }}</span>
+                                    </p>
+                                {% endif %}
+
+                                {% if item.can_register_now %}
+                                    <!-- Registration form/button will link to artwork_detail or a specific registration URL -->
+                                    <a href="{% url 'artworks:artwork_detail' item.artwork.slug %}#auction-signup" class="btn-register">Sign Up for Auction</a>
+                                    <!-- We'll add a #auction-signup anchor later to artwork_detail -->
+                                {% elif item.artwork.auction_status == 'live' and item.registration and item.registration.status == 'approved' %}
+                                    <a href="#" class="btn-view-auction">Go to Bidding Page (Placeholder)</a>
+                                {% elif item.artwork.auction_status == 'live' and not item.registration %}
+                                     <p><small>Bidding is live. Registration window closed.</small></p>
+                                {% elif item.artwork.auction_status == 'live' and item.registration and item.registration.status != 'approved' %}
+                                     <p><small>Bidding is live. Your registration was not approved.</small></p>
+                                {% endif %}
+                            </div>
+                        {% else %}
+                             <p style="margin-top:10px;"><a href="{% url 'login' %}?next={{ request.path }}">Login</a> to see registration status or participate.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <p>There are currently no auctions available or matching your criteria.</p>
+    {% endif %}
+
+{% endblock content %}

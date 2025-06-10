@@ -1,0 +1,133 @@
+<!-- artworks/templates/artworks/manage_auction_registrations.html -->
+{% extends "base.html" %}
+{% load static %}
+
+{% block page_title %}{{ page_title }}{% endblock page_title %}
+
+{% block extra_head %}
+<style>
+    .registrations-container { margin-top: 20px; }
+    .registration-table { width: 100%; border-collapse: collapse; }
+    .registration-table th, .registration-table td {
+        border: 1px solid #ddd;
+        padding: 8px 12px;
+        text-align: left;
+    }
+    .registration-table th { background-color: #f8f9fa; }
+    .registration-item-actions form {
+        display: inline-block; /* Keep buttons on the same line */
+        margin-right: 5px;
+    }
+    .btn-approve { background-color: #28a745; color: white; border:none; padding: 6px 10px; border-radius:4px; cursor:pointer; }
+    .btn-approve:hover { background-color: #218838; }
+    .btn-reject { background-color: #dc3545; color: white; border:none; padding: 6px 10px; border-radius:4px; cursor:pointer; }
+    .btn-reject:hover { background-color: #c82333; }
+    .status-text-pending { color: #ffc107; font-weight: bold; }
+    .status-text-approved { color: #28a745; font-weight: bold; }
+    .status-text-rejected { color: #dc3545; font-weight: bold; }
+    .no-registrations { margin-top: 15px; font-style: italic; }
+</style>
+{% endblock extra_head %}
+
+{% block content %}
+    <h1>{{ page_title }}</h1>
+    <p>
+        <a href="{% url 'artworks:artwork_detail' artwork.slug %}" class="back-link">« Back to Artwork Details</a>
+    </p>
+    <p>
+        Current Auction Status: <strong>{{ artwork.get_auction_status_display }}</strong>
+    </p>
+    {% if artwork.auction_status == 'signup_open' %}
+        <p>Sign-up is currently open. You can review registrations as they come in or wait until the sign-up period closes ({{ artwork.auction_signup_deadline|date:"F j, Y, P T" }}).</p>
+    {% elif artwork.auction_status == 'awaiting_attendee_approval' %}
+        <p>The sign-up period has closed. Please review the pending registrations.</p>
+    {% elif artwork.auction_status == 'ready_to_start' %}
+        <p>All registrations have been reviewed (or the system assumes so). The auction is ready to start at {{ artwork.auction_start_time|date:"F j, Y, P T" }}.</p>
+    {% endif %}
+
+
+    <div class="registrations-container">
+        {% if registrations %}
+            <table class="registration-table">
+                <thead>
+                    <tr>
+                        <th>User</th>
+                        <th>Registered At</th>
+                        <th>Status</th>
+                        <th>Last Reviewed</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for reg in registrations %}
+                        <tr>
+                            <td>{{ reg.user.username }}</td>
+                            <td>{{ reg.registered_at|date:"F j, Y, P T" }}</td>
+                            <td>
+                                <span class="status-text-{{ reg.status }}">
+                                    {{ reg.get_status_display }}
+                                </span>
+                            </td>
+                            <td>{{ reg.owner_reviewed_at|date:"F j, Y, P T"|default:"Not yet reviewed" }}</td>
+                            <td class="registration-item-actions">
+                                {% if reg.status == 'pending' %}
+                                    <form method="POST" action="{% url 'artworks:manage_auction_registrations' artwork.slug %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="registration_id" value="{{ reg.id }}">
+                                        <input type="hidden" name="action" value="approve">
+                                        <button type="submit" class="btn-approve">Approve</button>
+                                    </form>
+                                    <form method="POST" action="{% url 'artworks:manage_auction_registrations' artwork.slug %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="registration_id" value="{{ reg.id }}">
+                                        <input type="hidden" name="action" value="reject">
+                                        <button type="submit" class="btn-reject">Reject</button>
+                                    </form>
+                                {% elif reg.status == 'approved' %}
+                                    <!-- Optionally, allow revoking approval if auction not live -->
+                                    {% if artwork.auction_status != 'live' and artwork.auction_status != 'ended_pending_payment' and artwork.auction_status != 'completed' %}
+                                    <form method="POST" action="{% url 'artworks:manage_auction_registrations' artwork.slug %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="registration_id" value="{{ reg.id }}">
+                                        <input type="hidden" name="action" value="reject"> <!-- Change to 'pending' or 'reject' -->
+                                        <button type="submit" class="btn-reject">Revoke Approval (Reject)</button>
+                                    </form>
+                                    {% else %}
+                                        <span>Approved</span>
+                                    {% endif %}
+                                {% elif reg.status == 'rejected' %}
+                                     <!-- Optionally, allow re-considering rejection if auction not live -->
+                                    {% if artwork.auction_status != 'live' and artwork.auction_status != 'ended_pending_payment' and artwork.auction_status != 'completed' %}
+                                    <form method="POST" action="{% url 'artworks:manage_auction_registrations' artwork.slug %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="registration_id" value="{{ reg.id }}">
+                                        <input type="hidden" name="action" value="approve"> <!-- Change to 'pending' or 'approve' -->
+                                        <button type="submit" class="btn-approve">Re-consider (Approve)</button>
+                                    </form>
+                                    {% else %}
+                                        <span>Rejected</span>
+                                    {% endif %}
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <p class="no-registrations">No users have registered for this auction yet.</p>
+        {% endif %}
+    </div>
+
+    {% if artwork.auction_status == 'awaiting_attendee_approval' %}
+        <div style="margin-top: 20px;">
+            <p>Once you have reviewed all registrations, the auction will become 'Ready to Start'.</p>
+            <!-- Optionally, add a button for owner to manually mark as 'Ready to Start' -->
+            <!-- <form method="POST" action="{% url 'artworks:update_auction_overall_status' artwork.slug %}"> -->
+            <!--     {% csrf_token %} -->
+            <!--     <input type="hidden" name="new_status" value="ready_to_start"> -->
+            <!--     <button type="submit">Finalize Approvals & Mark as Ready to Start</button> -->
+            <!-- </form> -->
+        </div>
+    {% endif %}
+
+{% endblock content %}

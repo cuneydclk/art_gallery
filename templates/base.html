@@ -32,12 +32,12 @@
             background-color: #0056b3;
         }
         input[type="text"], input[type="password"], input[type="email"], input[type="number"], textarea, select {
-            width: calc(100% - 22px);
+            width: calc(100% - 22px); /* Adjusted for padding and border */
             padding: 10px;
             margin-bottom: 10px;
             border: 1px solid #ccc;
             border-radius: 4px;
-            box-sizing: border-box;
+            box-sizing: border-box; /* Important for width calculation */
         }
         label {
             display: block;
@@ -53,10 +53,11 @@
             <nav>
                 <ul>
                     <li><a href="{% url 'artworks:artwork_list' %}">Gallery</a></li>
+                    <li><a href="{% url 'artworks:available_auctions' %}">Auctions</a></li> <!-- ADDED THIS LINE -->
                     {% if user.is_authenticated %}
                         <li>Welcome, {{ user.username }}!</li>
                         <li><a href="{% url 'artworks:my_art' %}">My Art</a></li>
-                        <li><a href="{% url 'artworks:edit_profile' %}">Edit Profile/Bank</a></li> {# NEW LINK #}
+                        <li><a href="{% url 'artworks:edit_profile' %}">Edit Profile/Bank</a></li>
                         <li>
                             <form id="logout-form" method="post" action="{% url 'logout' %}">
                                 {% csrf_token %}
