@@ -1,0 +1,169 @@
+<!-- artworks/templates/artworks/auction_bidding_page.html -->
+{% extends "base.html" %}
+{% load static %}
+{% load artwork_extras %} <!-- For humanize_timedelta -->
+
+{% block page_title %}{{ page_title }}{% endblock page_title %}
+
+{% block extra_head %}
+<style>
+    .bidding-page-container { max-width: 900px; margin: auto; }
+    .artwork-info-bidding { display: flex; gap: 20px; margin-bottom: 20px; }
+    .artwork-info-bidding img { max-width: 200px; height: auto; border-radius: 4px; }
+    .artwork-info-bidding h2 { margin-top: 0; }
+    .auction-stats { background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+    .auction-stats p { margin: 8px 0; font-size: 1.1em; }
+    .auction-stats .label { font-weight: bold; }
+    .auction-stats .value { color: #007bff; }
+    #countdown-timer { font-size: 1.5em; font-weight: bold; color: #dc3545; margin-bottom:10px;}
+    .soft-close-notice { color: #17a2b8; font-style: italic; font-size:0.9em; margin-bottom:10px; }
+    .bid-form-container { background-color: #f8f9fa; padding: 20px; border-radius: 5px; border: 1px solid #dee2e6; }
+    .bid-form-container h3 { margin-top: 0; }
+    .quick-bid-buttons button {
+        margin: 5px;
+        padding: 10px 15px;
+        background-color: #6c757d;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    .quick-bid-buttons button:hover { background-color: #5a6268; }
+    .bid-history-placeholder { margin-top:30px; border-top:1px solid #eee; padding-top:20px; }
+    .bid-history-placeholder h4 { margin-top:0; }
+</style>
+{% endblock extra_head %}
+
+{% block content %}
+<div class="bidding-page-container">
+    <a href="{% url 'artworks:artwork_detail' artwork.slug %}" class="back-link" style="display:inline-block; margin-bottom:15px;">« Back to Artwork Details</a>
+
+    <div class="artwork-info-bidding">
+        {% if artwork.image_placeholder_url %}
+            <img src="{{ artwork.image_placeholder_url }}" alt="{{ artwork.title }}">
+        {% else %}
+            <img src="https://via.placeholder.com/200.png?text=No+Image" alt="No image available">
+        {% endif %}
+        <div>
+            <h2>{{ artwork.title }}</h2>
+            <p>by {{ artwork.current_owner.username }}</p>
+            <p><em>{{ artwork.description|truncatewords:30 }}</em></p>
+        </div>
+    </div>
+
+    <div class="auction-stats">
+        <h3>Auction Status</h3>
+        <div id="countdown-timer">--:--:--</div>
+        {% if is_soft_close_active %}
+            <p class="soft-close-notice">Soft close active! Auction extended.</p>
+        {% endif %}
+        {% if auction_end_message %}
+            <p style="color: red; font-weight: bold;">{{ auction_end_message }}</p>
+        {% endif %}
+         <p><span class="label">Scheduled End:</span> <span class="value">{{ effective_end_time_for_display|date:"F j, Y, P T" }}</span></p>
+        <p><span class="label">Current Highest Bid:</span> <span class="value">${{ current_highest_bid|default_if_none:artwork.auction_minimum_bid|floatformat:2 }}</span>
+            {% if current_highest_bid and current_highest_bidder %}
+                (by {{ current_highest_bidder.username }})
+            {% elif not current_highest_bid %}
+                (Minimum Bid)
+            {% endif %}
+        </p>
+        {% if not current_highest_bid %}
+             <p><span class="label">Starting/Minimum Bid:</span> <span class="value">${{ artwork.auction_minimum_bid|floatformat:2 }}</span></p>
+        {% endif %}
+        <p><span class="label">Your Next Minimum Bid:</span> <span class="value">${{ min_next_bid|floatformat:2 }}</span></p>
+    </div>
+
+    {% if is_approved_attendee and not is_owner and not auction_end_message %}
+        <div class="bid-form-container">
+            <h3>Place Your Bid</h3>
+            <form method="POST" action="{% url 'artworks:place_bid' artwork.slug %}">
+                {% csrf_token %}
+                {{ bid_form.as_p }}
+                <button type="submit">Place Bid</button>
+            </form>
+            {% if quick_bid_amounts %}
+            <div class="quick-bid-buttons" style="margin-top:15px;">
+                <p><strong>Quick Bids:</strong></p>
+                {% for amount in quick_bid_amounts %}
+                    <form method="POST" action="{% url 'artworks:place_bid' artwork.slug %}" style="display:inline;">
+                        {% csrf_token %}
+                        <input type="hidden" name="bid_amount" value="{{ amount|floatformat:2 }}">
+                        <button type="submit">${{ amount|floatformat:2 }}</button>
+                    </form>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    {% elif is_owner %}
+        <p><em>As the owner, you can monitor the auction but cannot place bids.</em></p>
+    {% elif not auction_end_message %}
+        <p><em>You are viewing this auction. Bidding is only available for approved attendees.</em></p>
+    {% endif %}
+
+    <div class="bid-history-placeholder">
+        <h4>Bid History (Placeholder)</h4>
+        <p><em>A list of recent bids will appear here. (To be implemented)</em></p>
+        <!-- We will populate this later, possibly with AJAX -->
+    </div>
+</div>
+
+{% if time_remaining_seconds > 0 and not auction_end_message %} {# Keep condition for initial script inclusion #}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    let timeLeft = {{ time_remaining_seconds }};
+    const timerElement = document.getElementById('countdown-timer');
+    let hasReloaded = false; // Prevent multiple reloads
+
+    function updateTimer() {
+        if (timeLeft <= 0) {
+            timerElement.textContent = "Auction Ended - Checking Status...";
+            if (!hasReloaded) {
+                hasReloaded = true;
+                // Reload the page to trigger server-side finalization check
+                // Add a small delay to allow the message to be seen briefly
+                setTimeout(function() {
+                    window.location.reload();
+                }, 2000); // Reload after 2 seconds
+            }
+            return; // Stop the interval if it's still running somehow
+        }
+
+        let days = Math.floor(timeLeft / (60 * 60 * 24));
+        let hours = Math.floor((timeLeft % (60 * 60 * 24)) / (60 * 60));
+        let minutes = Math.floor((timeLeft % (60 * 60)) / 60);
+        let seconds = Math.floor(timeLeft % 60);
+
+        let displayText = "";
+        if (days > 0) displayText += days + "d ";
+        displayText += String(hours).padStart(2, '0') + ":" +
+                       String(minutes).padStart(2, '0') + ":" +
+                       String(seconds).padStart(2, '0');
+        
+        timerElement.textContent = displayText;
+        timeLeft--;
+    }
+
+    if (timerElement && timeLeft > 0) { // Only start interval if there's time left
+        const timerInterval = setInterval(function() {
+            updateTimer();
+            if (timeLeft < 0 && !hasReloaded) { // Ensure it stops and reloads if somehow missed
+                clearInterval(timerInterval);
+                updateTimer(); // Call one last time to display "Ended" and trigger reload
+            }
+        }, 1000);
+        updateTimer(); // Initial call to display time immediately
+    } else if (timerElement) { // Time is already zero or less on page load
+         timerElement.textContent = "Auction May Have Ended - Checking...";
+         if (!hasReloaded && timeLeft <=0) { // Check timeLeft too
+            hasReloaded = true;
+            setTimeout(function() {
+                window.location.reload();
+            }, 1000); // Quicker reload if already ended on load
+         }
+    }
+});
+</script>
+{% endif %}
+
+{% endblock content %}
