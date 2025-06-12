@@ -1,6 +1,6 @@
 # artworks/urls.py
 from django.urls import path
-from . import views # Import views from the current app
+from . import views
 
 app_name = 'artworks' # Namespace for URLs in this app
 
@@ -9,6 +9,8 @@ urlpatterns = [
     path('art/<slug:slug>/', views.artwork_detail_view, name='artwork_detail'), # Matches /gallery/art/ANY_SLUG/
     path('art/<slug:artwork_slug>/register/', views.auction_register_view, name='auction_register'),
     path('art/<slug:artwork_slug>/manage-registrations/', views.manage_auction_registrations_view, name='manage_auction_registrations'),
+    path('art/<slug:artwork_slug>/bidding/', views.auction_bidding_page_view, name='auction_bidding_page'),
+    path('art/<slug:artwork_slug>/place-bid/', views.place_bid_view, name='place_bid'),
     path('auctions/', views.available_auctions_view, name='available_auctions'),
     path('my-art/', views.my_art_view, name='my_art'),
     path('buy/initiate/<slug:artwork_slug>/', views.initiate_buy_view, name='initiate_buy'),

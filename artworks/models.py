@@ -6,6 +6,7 @@ from django.utils import timezone
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from datetime import timedelta
+from decimal import Decimal 
 
 class Artwork(models.Model):
     title = models.CharField(max_length=200)
@@ -232,6 +233,90 @@ class Artwork(models.Model):
             return AuctionRegistration.objects.get(artwork=self, user=user)
         except AuctionRegistration.DoesNotExist:
             return None
+        
+    def finalize_auction(self):
+        print(f"[finalize_auction] Called for: {self.title}, Current Status: {self.auction_status}")
+
+        # Prevent re-finalizing if already in a terminal auction state
+        if self.auction_status in ['ended_pending_payment', 'completed', 'failed_no_bids', 'failed_payment', 'cancelled_by_owner']:
+            print(f"[finalize_auction] Auction '{self.title}' already in a terminal state: {self.auction_status}. No action.")
+            # Return existing transaction if applicable, or None
+            if self.auction_status == 'ended_pending_payment' and self.auction_winner:
+                try:
+                    # Attempt to find the transaction associated with this win
+                    return Transaction.objects.get(artwork=self, buyer=self.auction_winner, sale_type='auction_win')
+                except Transaction.DoesNotExist:
+                    return None # Should not happen if status is ended_pending_payment correctly
+            return None
+
+        # This method assumes the *time* for auction end has passed.
+        # It now focuses on determining outcome based on bids.
+
+        highest_bid = Bid.objects.filter(artwork=self).order_by('-amount', '-timestamp').first()
+        
+        original_status_before_finalize = self.auction_status # For debugging/logging
+        changed_fields_artwork = []
+
+        if highest_bid and self.auction_minimum_bid is not None and highest_bid.amount >= self.auction_minimum_bid:
+            print(f"[finalize_auction] Winning bid found for '{self.title}': {highest_bid.amount} by {highest_bid.bidder.username}")
+            self.auction_status = 'ended_pending_payment'
+            self.auction_winner = highest_bid.bidder
+            self.auction_winning_price = highest_bid.amount
+            
+            changed_fields_artwork.extend(['auction_status', 'auction_winner', 'auction_winning_price'])
+            
+            if self.current_owner and self.auction_winner:
+                try:
+                    # Using get_or_create makes this method more idempotent regarding transaction creation
+                    transaction_obj, created = Transaction.objects.get_or_create(
+                        artwork=self,
+                        buyer=self.auction_winner,
+                        seller=self.current_owner, 
+                        sale_type='auction_win', # Key for uniqueness with artwork & buyer for an auction
+                        defaults={
+                            'final_price': self.auction_winning_price,
+                            'status': 'pending_payment'
+                        }
+                    )
+                    if created:
+                        print(f"[finalize_auction] Transaction CREATED for '{self.title}'. ID: {transaction_obj.id}")
+                    else:
+                        print(f"[finalize_auction] Transaction already EXISTED for '{self.title}'. ID: {transaction_obj.id}, Status: {transaction_obj.status}")
+                        # If transaction existed, ensure its price is correct (shouldn't change for auction win)
+                        if transaction_obj.final_price != self.auction_winning_price:
+                            transaction_obj.final_price = self.auction_winning_price
+                            transaction_obj.save(update_fields=['final_price'])
+                        # If it existed and was, e.g., 'cancelled', this logic doesn't automatically reopen it.
+                        # This might need more complex handling if an auction can be "re-won" by the same person
+                        # after a previous transaction failed. For now, get_or_create is good.
+
+                    self.save(update_fields=changed_fields_artwork)
+                    print(f"[finalize_auction] Artwork '{self.title}' saved. New status: {self.auction_status}")
+                    return transaction_obj
+                except Exception as e:
+                    print(f"[finalize_auction] ERROR creating/getting transaction for '{self.title}': {e}")
+                    self.auction_status = 'failed_payment' # Or a more specific error status
+                    self.auction_winner = None # Clear winner if transaction fails
+                    self.auction_winning_price = None
+                    changed_fields_artwork = ['auction_status', 'auction_winner', 'auction_winning_price'] # Reset list for save
+                    self.save(update_fields=changed_fields_artwork)
+                    return None
+            else: # Should not happen if highest_bid and owner are present
+                print(f"[finalize_auction] Critical error: Missing current_owner or auction_winner for '{self.title}' despite a winning bid.")
+                self.auction_status = 'failed_payment' # Indicate an internal error
+                changed_fields_artwork = ['auction_status']
+                self.save(update_fields=changed_fields_artwork)
+                return None
+        else: 
+            print(f"[finalize_auction] No valid winning bid for '{self.title}'. Highest bid object: {highest_bid}. Min bid: {self.auction_minimum_bid}")
+            self.auction_status = 'failed_no_bids'
+            self.auction_winner = None
+            self.auction_winning_price = None
+            changed_fields_artwork.extend(['auction_status', 'auction_winner', 'auction_winning_price'])
+            self.save(update_fields=changed_fields_artwork)
+            print(f"[finalize_auction] Artwork '{self.title}' saved. New status: {self.auction_status}")
+            return None
+        
 class Comment(models.Model):
     artwork = models.ForeignKey(Artwork, on_delete=models.CASCADE, related_name='comments')
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, help_text="Registered user who commented, if any.")

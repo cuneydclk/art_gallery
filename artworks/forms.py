@@ -87,7 +87,6 @@ class UserProfileForm(forms.ModelForm):
             'bank_account_holder_name': 'Bank Account Holder Full Name',
         }
         
-# --- NEW FORM FOR AUCTION SETTINGS ---
 class ArtworkAuctionSettingsForm(forms.ModelForm):
     class Meta:
         model = Artwork
@@ -163,3 +162,10 @@ class ArtworkAuctionSettingsForm(forms.ModelForm):
 
         return cleaned_data
     
+class PlaceBidForm(forms.Form):
+    bid_amount = forms.DecimalField(
+        label="Your Bid Amount ($)",
+        min_value=0.01, # A very small minimum, actual minimum will be enforced by current bid + increment
+        decimal_places=2,
+        widget=forms.NumberInput(attrs={'step': '0.01', 'placeholder': 'e.g., 125.50'})
+    )
