@@ -61,14 +61,21 @@
             <p style="color: red; font-weight: bold;">{{ auction_end_message }}</p>
         {% endif %}
          <p><span class="label">Scheduled End:</span> <span class="value">{{ effective_end_time_for_display|date:"F j, Y, P T" }}</span></p>
-        <p><span class="label">Current Highest Bid:</span> <span class="value">${{ current_highest_bid|default_if_none:artwork.auction_minimum_bid|floatformat:2 }}</span>
-            {% if current_highest_bid and current_highest_bidder %}
-                (by {{ current_highest_bidder.username }})
+        <p>
+            <span class="label">Current Highest Bid:</span> 
+            <span class="value">
+                ${{ current_highest_bid|default_if_none:artwork.auction_minimum_bid|floatformat:2 }}
+            </span>
+            {% comment %} --- MODIFIED LINE BELOW --- {% endcomment %}
+            {% if current_highest_bid and current_highest_bidder_username %}
+                (by {{ current_highest_bidder_username }})
+            {% elif not current_highest_bid and artwork.auction_minimum_bid %}
+                 (Starting Minimum)
             {% elif not current_highest_bid %}
-                (Minimum Bid)
+                 (No bids yet)
             {% endif %}
         </p>
-        {% if not current_highest_bid %}
+        {% if not current_highest_bid and artwork.auction_minimum_bid %} {# Show starting bid clearly if no bids yet #}
              <p><span class="label">Starting/Minimum Bid:</span> <span class="value">${{ artwork.auction_minimum_bid|floatformat:2 }}</span></p>
         {% endif %}
         <p><span class="label">Your Next Minimum Bid:</span> <span class="value">${{ min_next_bid|floatformat:2 }}</span></p>

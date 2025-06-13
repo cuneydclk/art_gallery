@@ -390,7 +390,6 @@ def manage_auction_registrations_view(request, artwork_slug):
 
 @login_required
 def auction_bidding_page_view(request, artwork_slug):
-    print("!!!!!!!!!! SERVER IS RUNNING THE ABSOLUTELY LATEST auction_bidding_page_view VERSION !!!!!!!!!!")
     artwork_obj = get_object_or_404(Artwork, slug=artwork_slug)
     
     # Initial status update
@@ -557,11 +556,15 @@ def auction_bidding_page_view(request, artwork_slug):
         bid_form = PlaceBidForm(initial={'bid_amount': min_next_bid.quantize(Decimal('0.01'))})
         
     time_remaining_seconds = max(0, int((effective_end_time - now).total_seconds())) if effective_end_time and now < effective_end_time else 0
+    # Calculate soft close only if effective_end_time is set
     is_soft_close_active = False 
-    if artwork.last_bid_time and effective_end_time:
-        soft_close_extension_seconds = 3 * 60
-        if (effective_end_time - artwork.last_bid_time).total_seconds() < soft_close_extension_seconds + 5 :
-             is_soft_close_active = True if (now < effective_end_time) else False
+    if effective_end_time and artwork.last_bid_time: # THIS IS THE OLD LOGIC
+        soft_close_extension_seconds = 30 # <<< CHANGED FROM 3 * 60
+        potential_soft_close_end = artwork.last_bid_time + timedelta(seconds=soft_close_extension_seconds)
+        if potential_soft_close_end > effective_end_time:
+            effective_end_time = potential_soft_close_end # Update effective_end_time for this request
+            is_soft_close_active = True
+    print(f"[DEBUG] Calculated effective_end_time for '{artwork.title}': {effective_end_time}")
     
     quick_bids = []
     if is_approved_attendee and not is_owner and min_next_bid:
@@ -660,7 +663,7 @@ def place_bid_view(request, artwork_slug):
             artwork.last_bid_time = now
             
             # Soft close: if the bid is within X minutes of scheduled end, or after, extend the scheduled end time
-            soft_close_extension = timedelta(seconds=3 * 60) # 3 minutes
+            soft_close_extension = timedelta(seconds=30) # 30 seconds
             # Check if the current scheduled end time needs extension
             if artwork.auction_scheduled_end_time: # Ensure it's set
                 if (now + soft_close_extension) > artwork.auction_scheduled_end_time and \
@@ -725,7 +728,7 @@ def auction_bidding_page_view(request, artwork_slug): # MODIFIED FOR FIX
     # Calculate soft close only if effective_end_time is set
     is_soft_close_active = False 
     if effective_end_time and artwork.last_bid_time:
-        soft_close_extension_seconds = 3 * 60 
+        soft_close_extension_seconds = 30 
         potential_soft_close_end = artwork.last_bid_time + timedelta(seconds=soft_close_extension_seconds)
         if potential_soft_close_end > effective_end_time:
             effective_end_time = potential_soft_close_end # Update effective_end_time for this request
@@ -968,7 +971,7 @@ def place_bid_view(request, artwork_slug): # MODIFIED
             updated_fields_for_artwork = ['auction_current_highest_bid', 'auction_current_highest_bidder', 'last_bid_time']
 
             # Soft close logic: If the bid extends the auction
-            soft_close_extension = timedelta(seconds=3 * 60) # 3 minutes
+            soft_close_extension = timedelta(seconds=30) # 30 seconds
             new_potential_end_time = now + soft_close_extension
 
             if artwork_locked.auction_scheduled_end_time is None or new_potential_end_time > artwork_locked.auction_scheduled_end_time :
