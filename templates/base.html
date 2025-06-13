@@ -6,208 +6,70 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block page_title %}My Gallery{% endblock page_title %}</title>
-    <link rel="stylesheet" href="{% static 'css/main.css' %}">
+    <link rel="stylesheet" href="{% static 'css/main.css' %}"> {# We'll create this soon #}
     {% block extra_head %}{% endblock extra_head %}
     <style>
         body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f8f9fa; color: #333; }
-        
-        /* --- Header Styles --- */
-        header {
-            background-color: #343a40;
-            color: white;
-            padding: 0.8em 1em; /* Adjusted padding */
-            display: flex;
-            justify-content: space-between; /* Pushes title to left, nav items (or hamburger) to right */
-            align-items: center;
-            position: relative; /* For potential absolute positioning of dropdown */
-        }
-
-        header h1 {
-            margin: 0;
-            font-size: 1.5em;
-        }
-        header h1 a {
-            color: white;
-            text-decoration: none;
-        }
-
-        /* Navigation container */
-        header nav {
-            /* On desktop, nav will be part of the flex layout */
-        }
-
-        header nav ul {
-            list-style-type: none;
-            margin: 0;
-            padding: 0;
-            display: flex; /* Horizontal by default for desktop */
-            align-items: center;
-        }
-
-        header nav ul li {
-            margin-left: 15px; /* Spacing for desktop */
-            white-space: nowrap;
-        }
-        
-        header nav ul li:first-child {
-             margin-left: 0;
-        }
-
-
-        header nav ul li a,
-        header nav ul li .nav-text { /* For "Welcome" message */
-            color: #f8f9fa;
-            text-decoration: none;
-            padding: 8px 10px;
-            display: inline-block;
-            border-radius: 4px;
-        }
-        header nav ul li a:hover {
-            background-color: #495057;
-            color: #fff;
-        }
-        
-        /* Logout button styling */
-        header nav ul li form { margin: 0; display: inline; }
-        header nav ul li form button {
-            background: none; border: none; padding: 8px 10px;
-            color: inherit; cursor: pointer; font: inherit;
-            border-radius: 4px;
-        }
-        header nav ul li form button:hover {
-            background-color: #495057; color: #fff;
-        }
-
-        /* Hamburger Menu Button */
-        .hamburger-menu {
-            display: none; /* Hidden by default, shown on mobile */
-            font-size: 2em; /* Make it larger */
-            color: white;
-            background: none;
-            border: none;
-            cursor: pointer;
-            padding: 0 10px; /* Some padding for easier clicking */
-            line-height: 1; /* Align '...' better if using text */
-        }
-        /* End Header Styles */
-
+        header { background-color: #343a40; color: white; padding: 1em 2em; display: flex; justify-content: space-between; align-items: center; }
+        header h1 a { color: white; text-decoration: none; font-size: 1.5em; }
+        header nav ul { list-style-type: none; margin: 0; padding: 0; display: flex; }
+        header nav ul li { margin-left: 20px; }
+        header nav ul li a { color: #f8f9fa; text-decoration: none; }
+        header nav ul li a:hover { color: #adb5bd; }
         .container { max-width: 1200px; margin: 20px auto; padding: 20px; background-color: #fff; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
         footer { text-align: center; padding: 1em; background-color: #343a40; color: white; margin-top: 30px; }
-        
+        /* Basic button styling for forms */
         button, input[type="submit"] {
-            background-color: #007bff; color: white; padding: 10px 15px;
-            border: none; border-radius: 4px; cursor: pointer; font-size: 1em;
+            background-color: #007bff;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
         }
-        button:hover, input[type="submit"]:hover { background-color: #0056b3; }
+        button:hover, input[type="submit"]:hover {
+            background-color: #0056b3;
+        }
         input[type="text"], input[type="password"], input[type="email"], input[type="number"], textarea, select {
-            width: calc(100% - 22px); padding: 10px; margin-bottom: 10px;
-            border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; 
+            width: calc(100% - 22px); /* Adjusted for padding and border */
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box; /* Important for width calculation */
         }
-        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
         .errorlist { list-style-type: none; padding: 0; color: red; font-size: 0.9em; margin-bottom: 10px; }
-        
-        /* --- Responsive adjustments with Media Queries --- */
-        @media (max-width: 820px) { /* Breakpoint for hamburger menu to appear */
-            header nav ul#main-nav-list { /* Target the specific ul */
-                display: none; /* Hide the nav list by default on mobile */
-                flex-direction: column; /* Stack items when shown */
-                position: absolute; /* Position it relative to the header */
-                top: 100%; /* Place it below the header */
-                left: 0;
-                right: 0; /* Make it full width */
-                background-color: #343a40; /* Same as header */
-                z-index: 1000; /* Ensure it's on top of other content */
-                border-top: 1px solid #495057; /* Separator from header */
-                padding-bottom: 10px; /* Some spacing at the bottom */
-            }
-
-            header nav ul#main-nav-list.active {
-                display: flex; /* Show the nav list when active */
-            }
-
-            header nav ul#main-nav-list li {
-                margin-left: 0;
-                width: 100%;
-                text-align: center; /* Center nav items */
-            }
-            
-            header nav ul#main-nav-list li:not(:last-child) {
-                 border-bottom: 1px solid #495057; /* Separator lines */
-            }
-
-            header nav ul#main-nav-list li a,
-            header nav ul#main-nav-list li .nav-text, /* Target welcome message */
-            header nav ul#main-nav-list li form button {
-                display: block; /* Make links/buttons take full width */
-                padding: 12px 15px; /* More padding for touch */
-                width: 100%;
-                box-sizing: border-box;
-            }
-            
-            header nav ul#main-nav-list li .nav-text { /* Welcome message specific styling in dropdown */
-                color: #adb5bd; /* Lighter color for non-link */
-                cursor: default;
-            }
-             header nav ul#main-nav-list li .nav-text:hover {
-                background-color: transparent; /* No hover for welcome message */
-            }
-
-
-            .hamburger-menu {
-                display: block; /* Show hamburger button on mobile */
-            }
-
-            /* Optional: Keep Welcome message visible in header next to hamburger if desired */
-            .welcome-message-mobile {
-                display: none; /* Hidden by default */
-                color: #adb5bd;
-                margin-right: 10px; /* Space between it and hamburger */
-                font-size: 0.9em;
-            }
-            {% if user.is_authenticated %}
-            .welcome-message-mobile {
-                 display: inline-block; /* Show if user is authenticated */
-            }
-            header nav ul#main-nav-list li.welcome-item-in-dropdown {
-                display: none; /* Hide "Welcome..." from dropdown if shown in header */
-            }
-            {% endif %}
-        }
-
     </style>
 </head>
 <body>
     <header>
         <h1><a href="{% url 'artworks:artwork_list' %}">Art Gallery</a></h1>
-        
-        {% if user.is_authenticated %}
-            <span class="welcome-message-mobile">Welcome, {{ user.username }}!</span>
-        {% endif %}
-
-        <button class="hamburger-menu" id="hamburger-btn" aria-label="Toggle navigation" aria-expanded="false">
-            ⋮ <!-- Vertical ellipsis (⋮), or use ☰ (☰) -->
-        </button>
-        
-        <nav id="main-nav">
-            <ul id="main-nav-list">
-                <li><a href="{% url 'artworks:artwork_list' %}">Gallery</a></li>
-                <li><a href="{% url 'artworks:available_auctions' %}">Auctions</a></li>
-                {% if user.is_authenticated %}
-                    <li class="welcome-item-in-dropdown"><span class="nav-text">Welcome, {{ user.username }}!</span></li>
-                    <li><a href="{% url 'artworks:my_art' %}">My Art</a></li>
-                    <li><a href="{% url 'artworks:edit_profile' %}">Edit Profile/Bank</a></li>
-                    <li>
-                        <form id="logout-form" method="post" action="{% url 'logout' %}">
-                            {% csrf_token %}
-                            <button type="submit">Logout</button>
-                        </form>
-                    </li>
-                {% else %}
-                    <li><a href="{% url 'login' %}">Login</a></li>
-                    <li><a href="{% url 'signup' %}">Sign Up</a></li>
-                {% endif %}
-            </ul>
-        </nav>
+            <nav>
+                <ul>
+                    <li><a href="{% url 'artworks:artwork_list' %}">Gallery</a></li>
+                    <li><a href="{% url 'artworks:available_auctions' %}">Auctions</a></li> <!-- ADDED THIS LINE -->
+                    {% if user.is_authenticated %}
+                        <li>Welcome, {{ user.username }}!</li>
+                        <li><a href="{% url 'artworks:my_art' %}">My Art</a></li>
+                        <li><a href="{% url 'artworks:edit_profile' %}">Edit Profile/Bank</a></li>
+                        <li>
+                            <form id="logout-form" method="post" action="{% url 'logout' %}">
+                                {% csrf_token %}
+                                <button type="submit" style="background:none; border:none; padding:0; color:inherit; cursor:pointer; font: inherit;">Logout</button>
+                            </form>
+                        </li>
+                    {% else %}
+                        <li><a href="{% url 'login' %}">Login</a></li>
+                        <li><a href="{% url 'signup' %}">Sign Up</a></li>
+                    {% endif %}
+                </ul>
+            </nav>
     </header>
 
     <main class="container">
@@ -232,25 +94,6 @@
         <p>© {% now "Y" %} My Art Gallery. All rights reserved.</p>
         <p><a href="{% url 'admin:index' %}" style="color: #ccc;">Admin Panel</a></p>
     </footer>
-
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const hamburgerBtn = document.getElementById('hamburger-btn');
-            const mainNavList = document.getElementById('main-nav-list');
-
-            if (hamburgerBtn && mainNavList) {
-                hamburgerBtn.addEventListener('click', function() {
-                    const isExpanded = mainNavList.classList.toggle('active');
-                    hamburgerBtn.setAttribute('aria-expanded', isExpanded);
-                    if (isExpanded) {
-                        hamburgerBtn.innerHTML = '×'; // Change to 'X' (close icon)
-                    } else {
-                        hamburgerBtn.innerHTML = '⋮'; // Change back to ellipsis or hamburger
-                    }
-                });
-            }
-        });
-    </script>
 
 </body>
 </html>

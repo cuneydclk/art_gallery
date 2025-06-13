@@ -1,13 +1,12 @@
 <!-- artworks/templates/artworks/artwork_detail.html -->
 {% extends "base.html" %}
 {% load static %}
-{% load artwork_extras %} 
+{% load artwork_extras %} <!-- For humanize_timedelta if used, or other custom tags -->
 
 {% block page_title %}{{ artwork.title }} - My Gallery{% endblock page_title %}
 
 {% block extra_head %}
 <style>
-    /* ... (your existing styles) ... */
     .owner-actions-group { margin-bottom: 20px; }
     .owner-actions { margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; background-color: #f9f9f9; border-radius: 4px; }
     .owner-actions h4 { margin-top: 0; }
@@ -15,12 +14,19 @@
     .toggle-form-btn:hover { background-color: #5a6268; }
     .settings-form-container { display: none; padding: 15px; border: 1px dashed #ccc; margin-top: 10px; background-color: #fff; }
     
-    .management-link {
-        display: inline-block; margin-top: 10px; padding: 8px 12px;
-        background-color: #ffc107; color: #212529; text-decoration: none;
-        border-radius: 4px; font-size: 0.9em;
+    .management-link { /* Style for the new link */
+        display: inline-block;
+        margin-top: 10px;
+        padding: 8px 12px;
+        background-color: #ffc107; /* A distinct color, e.g., warning/amber */
+        color: #212529;
+        text-decoration: none;
+        border-radius: 4px;
+        font-size: 0.9em;
     }
-    .management-link:hover { background-color: #e0a800; }
+    .management-link:hover {
+        background-color: #e0a800;
+    }
 
     .actions { margin-top: 20px; } 
     .actions h3 { margin-bottom: 5px; }
@@ -32,20 +38,19 @@
     .btn-view-auction { background-color: #007bff; color: white; padding: 10px 15px; text-decoration:none; border-radius:4px; display:inline-block; }
     .btn-view-auction:hover { background-color: #0056b3; }
     
-    .auction-status { font-weight: bold; }
+    .auction-status { font-weight: bold; } /* General for any status text */
     .status-pending { color: #ffc107; }
     .status-approved { color: #28a745; }
     .status-rejected { color: #dc3545; }
-    .status-live { color: #007bff; font-weight: bold; } /* Make live status prominent */
+    .status-live { color: #007bff; }
     .status-signup_open { color: #17a2b8; }
-    .status-awaiting_start { color: #fd7e14; }
-    .status-configured { color: #6f42c1; } /* Purple for configured */
-    .status-draft { color: #6c757d; } /* Grey for draft */
-    .status-not_configured { color: #6c757d; }
-
+    /* Add more status-specific classes as needed for .get_auction_status_display if you want them colored too */
+    .status-awaiting_attendee_approval { color: #fd7e14; } /* Orange */
+    .status-ready_to_start { color: #20c997; } /* Tealish green */
 
     .back-link { display:inline-block; margin-bottom:15px; color: #007bff; text-decoration:none; }
     .back-link:hover { text-decoration:underline; }
+
 </style>
 {% endblock extra_head %}
 
@@ -76,6 +81,7 @@
         <!-- Owner Actions -->
         {% if user.is_authenticated and user == artwork.current_owner %}
         <div class="owner-actions-group"> 
+            
             <div class="owner-actions">
                 <h4>Manage Direct Sale Settings</h4>
                 <button id="toggleSaleFormBtn" class="toggle-form-btn">{% if direct_sale_form.instance.is_for_sale_direct %}Edit Direct Sale{% else %}Set for Direct Sale{% endif %}</button>
@@ -100,19 +106,15 @@
                     </form>
                 </div>
 
-                {% if artwork.is_for_auction and artwork.auction_status not in 'not_configured,draft' %} {# Simplified condition #}
+                {% if artwork.is_for_auction and artwork.auction_status not in 'draft,completed,failed_no_bids,failed_payment,cancelled_by_owner' %}
                     <hr style="margin: 15px 0;">
-                    {% if artwork.auction_status in "signup_open,awaiting_start" %}
-                        <a href="{% url 'artworks:manage_auction_registrations' artwork.slug %}" class="management-link">
-                            Manage Auction Registrations ({{ artwork.auction_registrations.count }})
-                        </a>
-                        <p><small>View users who signed up and approve/reject their participation.</small></p>
-                    {% elif artwork.auction_status == "live" %}
-                         <a href="{% url 'artworks:auction_bidding_page' artwork.slug %}" class="btn-view-auction" style="background-color: #17a2b8;">Monitor Live Auction</a>
-                         <p><small>View the live bidding page for your artwork.</small></p>
-                    {% endif %}
+                    <a href="{% url 'artworks:manage_auction_registrations' artwork.slug %}" class="management-link">
+                        Manage Auction Registrations ({{ artwork.auction_registrations.count }})
+                    </a>
+                    <p><small>View users who signed up and approve/reject their participation.</small></p>
                 {% endif %}
             </div>
+
         </div>
         {% endif %}
         <!-- End Owner Actions -->
@@ -121,74 +123,85 @@
             <h3>Sale Status</h3>
             {% if artwork.is_for_auction %}
                 <p><strong>Currently Configured for Auction</strong></p>
-                <p><strong>Status:</strong> <span class="auction-status status-{{ artwork.auction_status|slugify }}">{{ artwork.get_auction_status_display }}</span></p>
+                <p><strong>Status:</strong> <span class="auction-status status-{{ artwork.auction_status }}">{{ artwork.get_auction_status_display }}</span></p>
                 {% if artwork.auction_start_time %}
                     <p><strong>Auction Start:</strong> {{ artwork.auction_start_time|date:"F j, Y, P T" }}
                         {% if artwork.time_until_auction_starts %} (in {{ artwork.time_until_auction_starts|humanize_timedelta }}) {% endif %}
                     </p>
                 {% endif %}
-                {% if artwork.auction_status == 'signup_open' and artwork.auction_signup_deadline %} {# Only show if signup_open #}
+                {% if artwork.auction_signup_deadline %}
                     <p><strong>Sign-up Deadline:</strong> {{ artwork.auction_signup_deadline|date:"F j, Y, P T" }}
-                        {% if artwork.time_until_signup_deadline %} (closes in {{ artwork.time_until_signup_deadline|humanize_timedelta }}) {% endif %}
+                        {% if artwork.auction_status == 'signup_open' and artwork.time_until_signup_deadline %} (closes in {{ artwork.time_until_signup_deadline|humanize_timedelta }}) {% endif %}
                     </p>
                 {% endif %}
                 {% if artwork.auction_scheduled_end_time %}
                 <p><strong>Scheduled End:</strong> {{ artwork.auction_scheduled_end_time|date:"F j, Y, P T"|default:"Not set" }}</p>
                 {% endif %}
                 {% if artwork.auction_minimum_bid %}
-                <p><strong>Minimum Bid:</strong> ${{ artwork.auction_minimum_bid|floatformat:2|default:"N/A" }}</p>
+                <p><strong>Minimum Bid:</strong> ${{ artwork.auction_minimum_bid|default:"N/A" }}</p>
                 {% endif %}
                 
                 {% if artwork.auction_status == 'live' %}
-                    <p><strong>Current Highest Bid:</strong> ${{ artwork.auction_current_highest_bid|default_if_none:"No bids yet"|floatformat:2 }}</p>
+                    <p><strong>Current Highest Bid:</strong> ${{ artwork.auction_current_highest_bid|default_if_none:"No bids yet" }}</p>
                     {% if artwork.auction_current_highest_bidder %}
                         <p><strong>Highest Bidder:</strong> {{ artwork.auction_current_highest_bidder.username }}</p>
                     {% endif %}
-                    {# General link to bidding page if auction is live - for anyone to view, permissions handled by bidding_page_view #}
-                    {# This link will be primarily for non-owners or non-registered users to see they can go there, #}
-                    {# or for approved bidders if the specific link in auction-interaction-box is missed. #}
-                     <a href="{% url 'artworks:auction_bidding_page' artwork.slug %}" class="btn-view-auction" style="margin-top:10px;">
-                        View Live Auction
-                    </a>
+                    {% if user.is_authenticated and user_auction_registration_on_this_artwork and user_auction_registration_on_this_artwork.status == 'approved' %}
+                         <a href="#" class="btn-view-auction">Go to Bidding Page (Placeholder)</a>
+                    {% elif user.is_authenticated and not user_auction_registration_on_this_artwork and artwork.current_owner != user %}
+                         <p><em>Registration for this live auction has ended.</em></p>
+                    {% elif not user.is_authenticated %}
+                        <p><a href="{% url 'login' %}?next={{ request.path }}">Login</a> to participate.</p>
+                    {% endif %}
                 {% endif %}
 
-                <div class="auction-interaction-box" id="auction-signup">
+                <div class="auction-interaction-box" id="auction-signup"> {# Div for non-owner auction interactions #}
                     {% if user.is_authenticated %}
                         {% if artwork.current_owner == user %}
-                            <p><em>You are the owner of this artwork. Manage auction settings above.</em></p>
+                            {# Owner doesn't register, they see management link above #}
                         {% elif user_auction_registration_on_this_artwork %}
                             <p><strong>Your Registration Status:</strong>
-                                <span class="auction-status status-{{ user_auction_registration_on_this_artwork.status|slugify }}">
+                                <span class="auction-status 
+                                    {% if user_auction_registration_on_this_artwork.status == 'pending' %}status-pending{% endif %}
+                                    {% if user_auction_registration_on_this_artwork.status == 'approved' %}status-approved{% endif %}
+                                    {% if user_auction_registration_on_this_artwork.status == 'rejected' %}status-rejected{% endif %}
+                                ">
                                     {{ user_auction_registration_on_this_artwork.get_status_display }}
                                 </span>
                             </p>
-                            {% if user_auction_registration_on_this_artwork.status == 'approved' and artwork.is_auction_live_now %}
-                                <a href="{% url 'artworks:auction_bidding_page' artwork.slug %}" class="btn-view-auction" style="margin-top:5px;">Go to Bidding Page</a>
+                            {% if user_auction_registration_on_this_artwork.status == 'approved' and artwork.is_auction_live_now and artwork.current_owner != user %}
+                                <!-- Duplicated above, can consolidate later if needed -->
                             {% endif %}
-                        {% elif user_can_register_for_this_auction %} {# artwork.auction_status == 'signup_open' and not owner and not registered #}
+                        {% elif user_can_register_for_this_auction %}
                             <form method="POST" action="{% url 'artworks:auction_register' artwork.slug %}"> 
                                 {% csrf_token %}
                                 <button type="submit" class="btn-register-detail">Sign Up for this Auction</button>
                             </form>
                         {% elif artwork.auction_status == 'signup_open' %}
-                             <p><em>Sign-up is open, but you may not be eligible (e.g., prior registration issue or owner).</em></p>
+                            <p><em>Sign-up is open, but you may not be eligible at this time (e.g., if there was a previous registration issue).</em></p>
                         {% elif artwork.auction_status == 'live' %}
-                            <p><em>This auction is live. Registration period has ended. If approved, you can join via the "View Live Auction" button.</em></p>
-                        {% elif artwork.auction_status == 'awaiting_start' %}
-                            <p><em>Sign-up period closed. Owner is reviewing. Auction starts soon.</em></p>
-                        {% elif artwork.auction_status == 'configured' %}
-                             <p><em>Auction is being configured. Sign-up will open soon.</em></p>
-                        {% else %} {# draft, not_configured, or ended states #}
-                             <p><em>This auction is not currently active for sign-ups or bidding (Status: {{ artwork.get_auction_status_display }}).</em></p>
+                            <p><em>This auction is live. The registration period has ended.</em></p>
+                        {% elif artwork.auction_status == 'awaiting_attendee_approval' %}
+                            <p><em>The sign-up period for this auction has ended. Owner is reviewing registrations.</em></p>
+                        {% elif artwork.auction_status in 'pending_signup_window,ready_to_start' %}
+                             <p><em>Auction sign-up is not active yet or is pending start.</em></p>
+                        {% elif artwork.auction_status in 'ended_pending_payment,completed,failed_no_bids,failed_payment,cancelled_by_owner,draft' %}
+                            <p><em>This auction is not currently active for sign-ups.</em></p>
+                        {% else %}
+                             <p><em>Sign-up for this auction is not currently available (Status: {{ artwork.get_auction_status_display }}).</em></p>
                         {% endif %}
                     {% else %} {# User not authenticated #}
-                        <p><a href="{% url 'login' %}?next={{ request.path }}">Login</a> to participate in auctions or view details.</p>
+                        {% if artwork.auction_status == 'signup_open' or artwork.auction_status == 'live' %}
+                            <p><a href="{% url 'login' %}?next={{ request.path }}">Login</a> to participate in this auction.</p>
+                        {% else %}
+                            <p><a href="{% url 'login' %}?next={{ request.path }}">Login</a> to view auction details.</p>
+                        {% endif %}
                     {% endif %}
                 </div>
 
             {% elif artwork.is_for_sale_direct and artwork.direct_sale_price %}
                 <p><strong>Available for Direct Sale</strong></p>
-                <p><strong>Price: ${{ artwork.direct_sale_price|floatformat:2 }}</strong></p>
+                <p><strong>Price: ${{ artwork.direct_sale_price }}</strong></p>
                 {% if user.is_authenticated %}
                     {% if user != artwork.current_owner %}
                         <form method="post" action="{% url 'artworks:initiate_buy' artwork.slug %}">
@@ -206,6 +219,7 @@
 
         <hr>
         <div class="comments-section">
+            <!-- ... comments ... -->
             <h3>Comments ({{ comments.count }})</h3>
             <div class="comment-form">
                 <h4>Leave a Comment</h4>
@@ -245,30 +259,20 @@
                     const hasErrors = formErrorExpression; 
                     const isFeatureActive = isFeatureActiveExpression; 
                     if (hasErrors) { formContainer.style.display = 'block'; } 
-                    // else { formContainer.style.display = 'none'; } // Keep based on previous state or error
+                    else { formContainer.style.display = 'none'; }
                     if (isFeatureActive) { toggleBtn.textContent = 'Edit ' + featureName + ' Settings'; } 
                     else { toggleBtn.textContent = 'Set for ' + featureName; }
-                    
                     toggleBtn.addEventListener('click', function() {
                         const isCurrentlyVisible = formContainer.style.display === 'block';
-                        formContainer.style.display = isCurrentlyVisible ? 'none' : 'block';
-                        // Update button text based on the *actual* feature active state, not visibility
-                        if (isFeatureActiveExpression) { // Check the feature's active state
-                             toggleBtn.textContent = isCurrentlyVisible ? 'Edit ' + featureName + ' Settings' : 'Hide ' + featureName + ' Settings';
+                        if (isCurrentlyVisible) {
+                            formContainer.style.display = 'none';
+                            if (isFeatureActiveExpression) { toggleBtn.textContent = 'Edit ' + featureName + ' Settings'; } 
+                            else { toggleBtn.textContent = 'Set for ' + featureName; }
                         } else {
-                             toggleBtn.textContent = isCurrentlyVisible ? 'Set for ' + featureName : 'Hide ' + featureName + ' Settings';
+                            formContainer.style.display = 'block';
+                            toggleBtn.textContent = 'Hide ' + featureName + ' Settings';
                         }
                     });
-                     // Preserve open state if there were errors
-                    if (hasErrors && formContainer.style.display !== 'block') {
-                        formContainer.style.display = 'block';
-                         if (isFeatureActiveExpression) { toggleBtn.textContent = 'Hide ' + featureName + ' Settings';}
-                         else {toggleBtn.textContent = 'Hide ' + featureName + ' Settings';}
-                    } else if (!hasErrors){
-                         formContainer.style.display = 'none';
-                         if (isFeatureActiveExpression) { toggleBtn.textContent = 'Edit ' + featureName + ' Settings';}
-                         else {toggleBtn.textContent = 'Set for ' + featureName;}
-                    }
                 }
             }
             initializeFormToggle('toggleSaleFormBtn', 'saleSettingsFormContainer', {{ direct_sale_form.errors|yesno:"true,false" }}, {{ direct_sale_form.instance.is_for_sale_direct|yesno:"true,false" }}, 'Direct Sale');
