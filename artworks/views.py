@@ -43,53 +43,42 @@ def my_art_view(request):
     }
     return render(request, 'artworks/my_art.html', context)
 
-def artwork_detail_view(request, slug): # SINGLE DEFINITION OF THIS VIEW
-    artwork = get_object_or_404(Artwork, slug=slug)
+def artwork_detail_view(request, slug):
+    artwork_obj = get_object_or_404(Artwork, slug=slug) # Use a distinct name
+
+    # Always ensure status is up-to-date before any logic or rendering
+    artwork_obj.get_effective_auction_status_and_save()
+    # Re-fetch because get_effective_auction_status_and_save might have saved changes
+    artwork = get_object_or_404(Artwork, pk=artwork_obj.pk)
+
     comments = artwork.comments.all().order_by('-created_at')
 
-    # Ensure artwork status is up-to-date
-    artwork.get_effective_auction_status_and_save() 
-    
-    print(f"--- Entering artwork_detail_view for slug: {slug} ---") 
-    print(f"Request method: {request.method}") 
-    print(f"Artwork current auction status: {artwork.auction_status}")
+    print(f"--- artwork_detail_view for slug: {slug}, Method: {request.method} ---")
+    print(f"Artwork current auction status (after effective check): {artwork.auction_status}")
 
-    # Initialize forms
     comment_form_initial = CommentForm() if request.user.is_authenticated else None
     guest_comment_form_initial = GuestCommentForm()
     direct_sale_form_initial = None
     auction_settings_form_initial = None
 
     if request.user.is_authenticated and request.user == artwork.current_owner:
-        print("User is owner, initializing owner forms.") 
         direct_sale_form_initial = ArtworkDirectSaleForm(instance=artwork)
         auction_settings_form_initial = ArtworkAuctionSettingsForm(instance=artwork)
 
-    # These will hold the forms to be rendered (possibly with errors)
+    # These will hold the forms to be rendered (possibly with errors from a previous POST)
     comment_form_to_render = comment_form_initial
     guest_comment_form_to_render = guest_comment_form_initial
     direct_sale_form_to_render = direct_sale_form_initial
     auction_settings_form_to_render = auction_settings_form_initial
-   
-    # User Auction Interaction Data for THIS artwork
-    user_can_register_for_this_auction = False
-    user_auction_registration_on_this_artwork = None
-    if request.user.is_authenticated:
-        # Make sure artwork status is fresh before checking registration eligibility
-        # artwork.get_effective_auction_status_and_save() # Already called above
-        user_can_register_for_this_auction = artwork.can_user_register_for_auction(request.user)
-        user_auction_registration_on_this_artwork = artwork.get_user_auction_registration(request.user)
-        print(f"User: {request.user.username}, Can register for this auction: {user_can_register_for_this_auction}, Existing reg: {user_auction_registration_on_this_artwork}")
-    
+
     if request.method == 'POST':
-        print(f"POST data: {request.POST}") 
+        print(f"POST data: {request.POST}")
 
         if 'submit_comment' in request.POST:
-            print("Processing: submit_comment") 
-            comment_form_processing = CommentForm(request.POST) if request.user.is_authenticated else GuestCommentForm(request.POST)
-            if comment_form_processing.is_valid(): 
-                print("Comment form IS VALID")
-                new_comment = comment_form_processing.save(commit=False)
+            print("Processing: submit_comment")
+            form_processor = CommentForm(request.POST) if request.user.is_authenticated else GuestCommentForm(request.POST)
+            if form_processor.is_valid():
+                new_comment = form_processor.save(commit=False)
                 new_comment.artwork = artwork
                 if request.user.is_authenticated:
                     new_comment.user = request.user
@@ -97,76 +86,60 @@ def artwork_detail_view(request, slug): # SINGLE DEFINITION OF THIS VIEW
                 messages.success(request, 'Your comment has been posted!')
                 return redirect('artworks:artwork_detail', slug=artwork.slug)
             else:
-                print(f"Comment form IS INVALID. Errors: {comment_form_processing.errors.as_json()}")
                 messages.error(request, 'There was an error posting your comment.')
                 if request.user.is_authenticated:
-                    comment_form_to_render = comment_form_processing
+                    comment_form_to_render = form_processor
                 else:
-                    guest_comment_form_to_render = comment_form_processing
+                    guest_comment_form_to_render = form_processor
 
         elif 'submit_sale_settings' in request.POST and request.user.is_authenticated and request.user == artwork.current_owner:
             print("Processing: submit_sale_settings")
-            direct_sale_form_processing = ArtworkDirectSaleForm(request.POST, instance=artwork)
-            if direct_sale_form_processing.is_valid(): 
-                print("Direct sale form IS VALID")
-                updated_artwork = direct_sale_form_processing.save(commit=False)
-                if updated_artwork.is_for_sale_direct:
-                    updated_artwork.is_for_auction = False 
-                    updated_artwork.auction_status = 'draft' 
-                updated_artwork.save()
+            form_processor = ArtworkDirectSaleForm(request.POST, instance=artwork)
+            if form_processor.is_valid():
+                updated_artwork_instance = form_processor.save(commit=False)
+                # Model's save method will handle turning off auction if direct sale is enabled.
+                updated_artwork_instance.save()
                 messages.success(request, 'Direct sale settings updated successfully!')
-                return redirect('artworks:artwork_detail', slug=artwork.slug)
+                return redirect('artworks:artwork_detail', slug=updated_artwork_instance.slug) # Use slug from saved instance
             else:
-                print(f"Direct sale form IS INVALID. Errors: {direct_sale_form_processing.errors.as_json()}")
                 messages.error(request, 'Error updating direct sale settings.')
-                direct_sale_form_to_render = direct_sale_form_processing
+                direct_sale_form_to_render = form_processor
 
         elif 'submit_auction_settings' in request.POST and request.user.is_authenticated and request.user == artwork.current_owner:
             print("Processing: submit_auction_settings")
-            auction_settings_form_processing = ArtworkAuctionSettingsForm(request.POST, instance=artwork)
-            if auction_settings_form_processing.is_valid():
-                print("Auction form IS VALID") 
-                updated_artwork = auction_settings_form_processing.save(commit=False)
-                if updated_artwork.is_for_auction:
-                    updated_artwork.is_for_sale_direct = False
-                    updated_artwork.direct_sale_price = None
-                    if updated_artwork.auction_status in ['draft', None, 'cancelled_by_owner', 'completed', 'failed_no_bids', 'failed_payment'] or not updated_artwork.auction_status:
-                        now = timezone.now()
-                        if updated_artwork.auction_start_time and updated_artwork.auction_signup_deadline:
-                            if now < updated_artwork.auction_signup_deadline:
-                                updated_artwork.auction_status = 'signup_open' 
-                            elif now < updated_artwork.auction_start_time:
-                                updated_artwork.auction_status = 'awaiting_attendee_approval'
-                            else: 
-                                updated_artwork.auction_status = 'live' 
-                        else:
-                             updated_artwork.auction_status = 'draft' 
-                else: 
-                    updated_artwork.auction_status = 'draft'
-                
-                print(f"Saving artwork. is_for_auction: {updated_artwork.is_for_auction}, status: {updated_artwork.auction_status}")
-                updated_artwork.save() 
-                messages.success(request, 'Auction settings updated successfully!')
-                print("Redirecting after successful auction update.")
-                # After successful save, re-fetch artwork to get latest state for context
-                artwork = get_object_or_404(Artwork, slug=slug) # Re-fetch
-                artwork.get_effective_auction_status_and_save() # Update status again if needed
-                user_can_register_for_this_auction = artwork.can_user_register_for_auction(request.user) if request.user.is_authenticated else False
-                user_auction_registration_on_this_artwork = artwork.get_user_auction_registration(request.user) if request.user.is_authenticated else None
-                # No need to redirect here if we want to show the updated state immediately
-                # but typically a redirect after POST is good practice (PRG pattern)
-                # For now, let's keep the redirect for simplicity of state.
-                return redirect('artworks:artwork_detail', slug=artwork.slug)
+            form_processor = ArtworkAuctionSettingsForm(request.POST, instance=artwork)
+            if form_processor.is_valid():
+                updated_artwork_instance = form_processor.save(commit=False)
 
+                # The model's save() method will:
+                # 1. Turn off direct sale if is_for_auction is true.
+                # 2. Calculate auction_signup_deadline.
+                # 3. Set auction_status to 'configured' (if new/draft and times are valid) or 'draft' (if times invalid).
+                updated_artwork_instance.save()
+                print(f"Artwork saved. Status after model save: '{updated_artwork_instance.auction_status}', "
+                      f"Signup Deadline: {updated_artwork_instance.auction_signup_deadline}")
+
+                # Now, call get_effective_auction_status_and_save() to transition based on time
+                # (e.g., from 'configured' to 'signup_open').
+                final_status = updated_artwork_instance.get_effective_auction_status_and_save()
+                print(f"Status after get_effective_auction_status_and_save: '{final_status}'")
+
+                messages.success(request, f'Auction settings updated. New status: {updated_artwork_instance.get_auction_status_display()}')
+                return redirect('artworks:artwork_detail', slug=updated_artwork_instance.slug) # Use slug from saved instance
             else:
-                print(f"Auction form IS INVALID. Errors: {auction_settings_form_processing.errors.as_json(escape_html=True)}") 
+                print(f"Auction form IS INVALID. Errors: {form_processor.errors.as_json(escape_html=True)}")
                 messages.error(request, 'Error updating auction settings. Please check the details provided.')
-                auction_settings_form_to_render = auction_settings_form_processing
+                auction_settings_form_to_render = form_processor
         else:
-            print("POST request, but no recognized submit button found in POST data for owner actions, or user not owner.")
+            print("POST request, but no recognized submit button or user not owner/authenticated.")
+
+    # For GET request or if POST didn't redirect, prepare context with fresh data
+    # (artwork was already re-fetched at the beginning of the view after the initial effective status check)
+    user_can_register_for_this_auction = artwork.can_user_register_for_auction(request.user) if request.user.is_authenticated else False
+    user_auction_registration_on_this_artwork = artwork.get_user_auction_registration(request.user) if request.user.is_authenticated else None
 
     context = {
-        'artwork': artwork, # artwork object, potentially updated by get_effective_auction_status_and_save
+        'artwork': artwork,
         'comments': comments,
         'comment_form': comment_form_to_render,
         'guest_comment_form': guest_comment_form_to_render,
@@ -176,8 +149,7 @@ def artwork_detail_view(request, slug): # SINGLE DEFINITION OF THIS VIEW
         'user_can_register_for_this_auction': user_can_register_for_this_auction,
         'user_auction_registration_on_this_artwork': user_auction_registration_on_this_artwork,
     }
-    print(f"--- Context for template: Can register: {user_can_register_for_this_auction}, User Reg Obj: {user_auction_registration_on_this_artwork} ---")
-    print(f"--- Rendering template artwork_detail.html for auction_status: {artwork.auction_status} ---")
+    print(f"--- Context for template: Artwork Status: {artwork.auction_status}, Can register: {user_can_register_for_this_auction} ---")
     return render(request, 'artworks/artwork_detail.html', context)
 
 @login_required
@@ -418,143 +390,208 @@ def manage_auction_registrations_view(request, artwork_slug):
 
 @login_required
 def auction_bidding_page_view(request, artwork_slug):
-    artwork = get_object_or_404(Artwork, slug=artwork_slug)
+    print("!!!!!!!!!! SERVER IS RUNNING THE ABSOLUTELY LATEST auction_bidding_page_view VERSION !!!!!!!!!!")
+    artwork_obj = get_object_or_404(Artwork, slug=artwork_slug)
     
-    current_artwork_status = artwork.get_effective_auction_status_and_save()
-    print(f"Entering bidding page for {artwork.title}, status: {current_artwork_status}")
+    # Initial status update
+    artwork_obj.get_effective_auction_status_and_save()
+    artwork = get_object_or_404(Artwork, pk=artwork_obj.pk) # Re-fetch
+    current_artwork_status_at_load = str(artwork.auction_status) # Save for logging
+    
+    print(f"\n[VIEW DEBUG {request.user.username} @ {timezone.now()}] ===== BIDDING PAGE LOAD =====")
+    print(f"[VIEW DEBUG] Artwork: '{artwork.title}', Initial Effective Status: '{current_artwork_status_at_load}'")
 
-    if current_artwork_status != 'live':
-        messages.warning(request, "This auction is not currently live.")
+    now = timezone.now()
+    effective_end_time = artwork.auction_scheduled_end_time
+    print(f"[VIEW DEBUG] Server Time (now): {now}, Effective End Time: {effective_end_time}")
+
+    if not artwork.is_for_auction:
+        messages.info(request, f"The auction for '{artwork.title}' is no longer active.")
+        print(f"[VIEW DEBUG] Redirecting: Auction '{artwork.title}' is_for_auction=False.")
+        return redirect('artworks:artwork_detail', slug=artwork.slug)
+    
+    if not effective_end_time and current_artwork_status_at_load == 'live':
+        messages.error(request, f"Configuration Error: Auction '{artwork.title}' is live but has no scheduled end time.")
+        print(f"[VIEW DEBUG] Redirecting: Auction '{artwork.title}' live but no effective_end_time.")
         return redirect('artworks:artwork_detail', slug=artwork.slug)
 
+    # --- Attempt to finalize if time has passed and auction was live ---
+    if current_artwork_status_at_load == 'live' and effective_end_time and now >= effective_end_time:
+        print(f"[VIEW DEBUG] Auction Time UP for '{artwork.title}'. Entering FINALIZE BLOCK.")
+        print(f"[VIEW DEBUG]   User: {request.user.username}, Request Path: {request.path}")
+        
+        finalization_details = None # Initialize
+        with db_transaction.atomic():
+            artwork_to_finalize = Artwork.objects.select_for_update().get(pk=artwork.pk)
+            print(f"[VIEW DEBUG]   Locked Artwork '{artwork_to_finalize.title}'. Status before re-check: '{artwork_to_finalize.auction_status}'")
+
+            if artwork_to_finalize.auction_status == 'live' and \
+               artwork_to_finalize.auction_scheduled_end_time and \
+               timezone.now() >= artwork_to_finalize.auction_scheduled_end_time:
+                
+                print(f"[VIEW DEBUG]   Conditions MET for finalization inside lock. Calling finalize_auction().")
+                finalization_details = artwork_to_finalize.finalize_auction()
+                artwork = artwork_to_finalize 
+                print(f"[VIEW DEBUG]   finalize_auction() COMPLETED. Outcome: {finalization_details.get('outcome')}, "
+                      f"New Artwork Status: '{artwork.auction_status}', is_for_auction: {artwork.is_for_auction}")
+            else:
+                artwork = artwork_to_finalize 
+                print(f"[VIEW DEBUG]   Conditions for finalization NOT MET inside lock or already finalized by another process.")
+                print(f"[VIEW DEBUG]     Locked Artwork Status: '{artwork.auction_status}', Scheduled End: '{artwork.auction_scheduled_end_time}', Now: '{timezone.now()}'")
+                if artwork.auction_status != 'live':
+                    finalization_details = {'outcome': 'already_concluded_by_another_process'}
+
+        if finalization_details:
+            outcome = finalization_details.get('outcome')
+            print(f"[VIEW DEBUG] Processing finalize_auction outcome: '{outcome}' for user '{request.user.username}'")
+            
+            # THIS IS THE BLOCK WITH THE NEW DEBUG LINES
+            if outcome == 'winner_found':
+                transaction_obj = finalization_details.get('transaction')
+                winner_from_details = finalization_details.get('winner') 
+                price = finalization_details.get('price')
+                
+                print(f"[VIEW DEBUG WINNER CHECK] Outcome is 'winner_found'.") # <<< NEW
+                print(f"[VIEW DEBUG WINNER CHECK]   finalization_details winner: {winner_from_details} (type: {type(winner_from_details)})") # <<< NEW
+                if winner_from_details:
+                    print(f"[VIEW DEBUG WINNER CHECK]   finalization_details winner ID: {winner_from_details.id}") # <<< NEW
+                print(f"[VIEW DEBUG WINNER CHECK]   request.user: {request.user} (type: {type(request.user)})") # <<< NEW
+                if request.user.is_authenticated:
+                    print(f"[VIEW DEBUG WINNER CHECK]   request.user ID: {request.user.id}") # <<< NEW
+                print(f"[VIEW DEBUG WINNER CHECK]   request.user.is_authenticated: {request.user.is_authenticated}") # <<< NEW
+
+                msg_for_redirect = f"Auction for '{artwork.title}' ended! Winner: {winner_from_details.username if winner_from_details else 'N/A'}."
+                
+                if request.user.is_authenticated and winner_from_details and winner_from_details.id == request.user.id:
+                    print(f"[VIEW DEBUG WINNER CHECK]   User IS winner. Preparing redirect to payment.") # <<< NEW
+                    msg_for_redirect += " Congratulations! Please proceed to payment."
+                    messages.success(request, msg_for_redirect)
+                    if transaction_obj:
+                        print(f"[VIEW DEBUG WINNER CHECK]   REDIRECTING WINNER '{request.user.username}' to payment page for TxID: {transaction_obj.id}.") # <<< NEW
+                        return redirect('artworks:payment_and_dekont_upload', transaction_id=transaction_obj.id)
+                    else:
+                         print(f"[VIEW DEBUG WINNER CHECK ERROR]   Winner path, but transaction_obj is None! Redirecting to artwork detail.") # <<< NEW
+                         messages.error(request, "Error in auction finalization (tx missing for winner). Contact support.")
+                         return redirect('artworks:artwork_detail', slug=artwork.slug)
+                else:
+                    print(f"[VIEW DEBUG WINNER CHECK]   User IS NOT winner (or issue with objects). Redirecting non-winner/observer.") # <<< NEW
+                    msg_for_redirect += " Awaiting payment from winner."
+                    messages.success(request, msg_for_redirect)
+                    return redirect('artworks:artwork_detail', slug=artwork.slug)
+            
+            elif outcome == 'no_bids':
+                messages.info(request, f"Auction for '{artwork.title}' ended: {finalization_details.get('message', 'No valid bids.')}")
+                print(f"[VIEW DEBUG]   NO_BIDS block. Redirecting to artwork detail.")
+                return redirect('artworks:artwork_detail', slug=artwork.slug)
+
+            elif outcome == 'transaction_error':
+                messages.error(request, f"Auction for '{artwork.title}' ended with an issue: {finalization_details.get('message', 'Please contact support.')}")
+                print(f"[VIEW DEBUG]   TRANSACTION_ERROR block. Redirecting to artwork detail.")
+                return redirect('artworks:artwork_detail', slug=artwork.slug)
+            
+            elif outcome == 'already_concluded_by_another_process':
+                print(f"[VIEW DEBUG]   ALREADY_CONCLUDED_BY_ANOTHER_PROCESS. Will proceed to post-finalization checks.")
+            
+            else: 
+                print(f"[VIEW DEBUG]   UNHANDLED finalize_auction outcome: '{outcome}'. Message: {finalization_details.get('message')}")
+        else: 
+            print(f"[VIEW DEBUG]   Finalize_auction was effectively SKIPPED inside lock (e.g. status was not live when checked with lock).")
+
+    current_artwork_status_for_render = str(artwork.auction_status)
+    print(f"[VIEW DEBUG] POST-FINALIZE BLOCK / PRE-RENDER for user '{request.user.username}'. Artwork Status: '{current_artwork_status_for_render}'")
+
+    if current_artwork_status_for_render == 'not_configured' and artwork.is_for_auction is False:
+        print(f"[VIEW DEBUG]   Artwork is 'not_configured' and not for auction (auction concluded).")
+        
+        if request.user.is_authenticated:
+            print(f"[VIEW DEBUG]   Checking for winning transaction for user '{request.user.username}'...")
+            last_win_transaction = Transaction.objects.filter(
+                artwork=artwork, buyer=request.user, sale_type='auction_win', status='pending_payment'
+            ).order_by('-initiated_at').first()
+
+            if last_win_transaction:
+                print(f"[VIEW DEBUG]   WINNING TRANSACTION FOUND (TxID: {last_win_transaction.id}) for user '{request.user.username}'.")
+                has_proceed_to_payment_msg = any("Proceed to payment" in m.message for m in messages.get_messages(request))
+                if not has_proceed_to_payment_msg:
+                     messages.success(request, f"Congratulations! You won the auction for '{artwork.title}'. Please complete your payment.")
+                print(f"[VIEW DEBUG]   REDIRECTING WINNER (post-finalize check) '{request.user.username}' to payment page.")
+                return redirect('artworks:payment_and_dekont_upload', transaction_id=last_win_transaction.id)
+            else:
+                print(f"[VIEW DEBUG]   No PENDING winning transaction found for user '{request.user.username}'.")
+        
+        has_any_end_message = any(m.level >= messages.INFO for m in messages.get_messages(request)) 
+        if not has_any_end_message:
+            generic_concluded_msg = f"The auction for '{artwork.title}' has concluded (Status: {artwork.get_auction_status_display()})."
+            messages.info(request, generic_concluded_msg)
+            print(f"[VIEW DEBUG]   Added generic concluded message: \"{generic_concluded_msg}\"")
+        else:
+            print(f"[VIEW DEBUG]   Skipping generic concluded message as other messages exist.")
+            
+        print(f"[VIEW DEBUG]   Redirecting to artwork detail page (auction concluded).")
+        return redirect('artworks:artwork_detail', slug=artwork.slug)
+
+    if current_artwork_status_for_render != 'live':
+        print(f"[VIEW DEBUG]   Artwork status is '{current_artwork_status_for_render}' (not 'live'). Redirecting to artwork detail.")
+        if not messages.get_messages(request):
+            messages.info(request, f"The auction for '{artwork.title}' is not currently live (Status: {artwork.get_auction_status_display()}).")
+        return redirect('artworks:artwork_detail', slug=artwork.slug)
+
+    print(f"[VIEW DEBUG] Auction '{artwork.title}' is LIVE. Preparing rendering context.")
     user_registration = artwork.get_user_auction_registration(request.user)
     is_approved_attendee = user_registration and user_registration.status == 'approved'
     is_owner = artwork.current_owner == request.user
+    print(f"[VIEW DEBUG]   Permissions: approved_attendee={is_approved_attendee}, is_owner={is_owner}")
 
     if not is_approved_attendee and not is_owner:
         messages.error(request, "You are not an approved attendee for this auction.")
+        print(f"[VIEW DEBUG]   User not approved and not owner. Redirecting to artwork detail.")
         return redirect('artworks:artwork_detail', slug=artwork.slug)
-    
-    highest_bid_obj = Bid.objects.filter(artwork=artwork).order_by('-amount', '-timestamp').first()
 
-    current_highest_bid_amount = None # Initialize
-    current_highest_bidder = None   # Initialize
-
-    # Try to use denormalized fields first for performance, then verify/override with Bid table
-    # This part can be simplified if denormalized fields are always trusted to be up-to-date by place_bid_view
-    temp_artwork_highest_bid = artwork.auction_current_highest_bid
-    temp_artwork_highest_bidder = artwork.auction_current_highest_bidder
-
-    if highest_bid_obj:
-        current_highest_bid_amount = highest_bid_obj.amount
-        current_highest_bidder = highest_bid_obj.bidder
-        if temp_artwork_highest_bid != current_highest_bid_amount:
-            print(f"Warning: Denormalized highest_bid on Artwork ({temp_artwork_highest_bid}) differs from Bid table ({current_highest_bid_amount}). Using Bid table.")
-    elif temp_artwork_highest_bid is not None : # No bids in Bid table, but denormalized field has a value (should be min_bid if logic is consistent)
-        # This case implies an issue or that minimum bid was stored in denormalized field as "current highest"
-        # For safety, if Bid table is empty, current_highest_bid should be None initially.
-        # The template will then show the minimum bid.
-        print(f"Warning: No bids in Bid table, but artwork.auction_current_highest_bid is {temp_artwork_highest_bid}. Setting current_highest_bid_amount to None.")
-        current_highest_bid_amount = None 
-        current_highest_bidder = None
-
-
-    # Determine minimum next bid
-    if current_highest_bid_amount is not None: # A bid exists
-        min_next_bid = current_highest_bid_amount + Decimal('1.00')
-    elif artwork.auction_minimum_bid is not None: # No bids yet, use auction's minimum bid
-        min_next_bid = artwork.auction_minimum_bid
-    else:
-        # This case should ideally not happen for a live auction (auction_minimum_bid should be required)
-        messages.error(request, "Auction configuration error: Minimum bid not set.")
-        return redirect('artworks:artwork_detail', slug=artwork.slug) # Or a more generic error page
+    current_highest_bid = artwork.auction_current_highest_bid
+    highest_bidder_username = artwork.auction_current_highest_bidder.username if artwork.auction_current_highest_bidder else None
+    min_next_bid = current_highest_bid + Decimal('1.00') if current_highest_bid else artwork.auction_minimum_bid
+    if min_next_bid is None: min_next_bid = Decimal('0.01')
 
     bid_form = None
     if is_approved_attendee and not is_owner:
-        bid_form = PlaceBidForm(initial={'bid_amount': min_next_bid.quantize(Decimal('0.01')) if min_next_bid else None})
-
-
-    # --- Time remaining and soft close logic ---
-    now = timezone.now()
-    time_remaining_seconds = 0
-    auction_end_message = None
-    soft_close_extension_seconds = 3 * 60  # 3 minutes
-
-    effective_end_time = artwork.auction_scheduled_end_time # This is a datetime object or None
-    is_soft_close_active = False
-
-    if not effective_end_time: # Should not happen for a live auction
-        messages.error(request, "Auction configuration error: Scheduled end time not set.")
-        return redirect('artworks:artwork_detail', slug=artwork.slug)
-
-
-    if artwork.last_bid_time:
-        potential_soft_close_end = artwork.last_bid_time + timedelta(seconds=soft_close_extension_seconds)
-        if potential_soft_close_end > effective_end_time:
-            effective_end_time = potential_soft_close_end
-            is_soft_close_active = True
-            print(f"Soft close active. New effective end: {effective_end_time}")
-
-    if now >= effective_end_time:
-        auction_end_message = "Auction has ended. Processing results..."
-        print(f"Bidding page: Auction for {artwork.title} should end. Now: {now}, Effective End: {effective_end_time}")
-        # Actual finalization (setting winner, etc.) will be handled more explicitly in Phase 6
-        # or triggered robustly by place_bid_view if a bid makes it end.
-    else:
-        time_remaining_delta = effective_end_time - now
-        time_remaining_seconds = int(time_remaining_delta.total_seconds())
-
-
-    # --- Quick Bid Amounts ---
-    quick_bid_amounts = []
-    # Base for quick bids: either current highest, or if none, the minimum bid for the auction
-    base_for_quick_bids_val = current_highest_bid_amount if current_highest_bid_amount is not None else artwork.auction_minimum_bid
-
-    if base_for_quick_bids_val is not None: # Ensure base_for_quick_bids_val is not None
-        # The first quick bid should be the minimum next valid bid
-        # min_next_bid is already calculated correctly above
+        bid_form = PlaceBidForm(initial={'bid_amount': min_next_bid.quantize(Decimal('0.01'))})
         
-        current_bidding_ref_point = min_next_bid # Start suggestions from min_next_bid
-
-        if current_bidding_ref_point is not None: # Ensure this isn't None
-            # Ensure we are not suggesting bids lower than the required minimum for the auction
-            if artwork.auction_minimum_bid is not None and current_bidding_ref_point < artwork.auction_minimum_bid:
-                 current_bidding_ref_point = artwork.auction_minimum_bid
-            
-            quick_bid_amounts.append(current_bidding_ref_point)
-            quick_bid_amounts.append(current_bidding_ref_point + Decimal('10.00'))
-            quick_bid_amounts.append(current_bidding_ref_point + Decimal('50.00'))
-            quick_bid_amounts.append(current_bidding_ref_point + Decimal('100.00'))
-            
-            # Filter and sanitize quick bids
-            valid_quick_bids = []
-            # Minimum bid to consider for any quick bid is the auction's minimum bid
-            auction_abs_min_bid = artwork.auction_minimum_bid if artwork.auction_minimum_bid is not None else Decimal('0.01')
-            # Current highest bid to compare against
-            current_high_for_check = current_highest_bid_amount if current_highest_bid_amount is not None else Decimal('-1.00') # Value lower than any valid bid
-
-            for qb_decimal in sorted(list(set(quick_bid_amounts))):
-                if qb_decimal > current_high_for_check and qb_decimal >= auction_abs_min_bid:
-                    valid_quick_bids.append(qb_decimal.quantize(Decimal('0.01'))) # Ensure 2 decimal places
-            
-            quick_bid_amounts = valid_quick_bids[:4] # Show up to 4 distinct, valid quick bids
-
+    time_remaining_seconds = max(0, int((effective_end_time - now).total_seconds())) if effective_end_time and now < effective_end_time else 0
+    is_soft_close_active = False 
+    if artwork.last_bid_time and effective_end_time:
+        soft_close_extension_seconds = 3 * 60
+        if (effective_end_time - artwork.last_bid_time).total_seconds() < soft_close_extension_seconds + 5 :
+             is_soft_close_active = True if (now < effective_end_time) else False
+    
+    quick_bids = []
+    if is_approved_attendee and not is_owner and min_next_bid:
+        base = min_next_bid
+        increments = [Decimal('0'), Decimal('10'), Decimal('50'), Decimal('100')]
+        temp_bids_list = [] 
+        for inc in increments:
+            potential_bid = (base + inc).quantize(Decimal('0.01'))
+            if current_highest_bid and potential_bid <= current_highest_bid:
+                if inc == Decimal('0'): 
+                    potential_bid = (current_highest_bid + Decimal('10')).quantize(Decimal('0.01'))
+                else: continue 
+            if potential_bid not in temp_bids_list : temp_bids_list.append(potential_bid)
+        quick_bids = sorted(list(set(temp_bids_list)))[:4]
 
     context = {
-        'artwork': artwork,
-        'bid_form': bid_form,
-        'current_highest_bid': current_highest_bid_amount, # This is a Decimal or None
-        'current_highest_bidder': current_highest_bidder,
-        'min_next_bid': min_next_bid, # This is a Decimal or None
-        'is_approved_attendee': is_approved_attendee,
-        'is_owner': is_owner,
+        'artwork': artwork, 'bid_form': bid_form,
+        'current_highest_bid': current_highest_bid,
+        'current_highest_bidder_username': highest_bidder_username,
+        'min_next_bid': min_next_bid,
+        'is_approved_attendee': is_approved_attendee, 'is_owner': is_owner,
         'time_remaining_seconds': time_remaining_seconds,
-        'auction_end_message': auction_end_message,
+        'auction_end_message': None, 
         'is_soft_close_active': is_soft_close_active,
         'effective_end_time_for_display': effective_end_time,
-        'quick_bid_amounts': quick_bid_amounts, # List of Decimals
+        'quick_bid_amounts': quick_bids,
         'page_title': f"Live Bidding: {artwork.title}"
     }
+    print(f"[VIEW DEBUG] Rendering bidding page for '{artwork.title}'. Time Rem: {time_remaining_seconds}s")
+    print(f"[VIEW DEBUG] ===== BIDDING PAGE RENDER END =====\n")
     return render(request, 'artworks/auction_bidding_page.html', context)
 
 @login_required
@@ -667,179 +704,210 @@ def place_bid_view(request, artwork_slug):
         return redirect('artworks:artwork_detail', slug=artwork.slug)
     
 @login_required
-def auction_bidding_page_view(request, artwork_slug):
+def auction_bidding_page_view(request, artwork_slug): # MODIFIED FOR FIX
     print(f"[DEBUG] 0. Entered auction_bidding_page_view for slug: {artwork_slug}")
     artwork = get_object_or_404(Artwork, slug=artwork_slug)
     
     artwork.get_effective_auction_status_and_save() # Update status first
     artwork = Artwork.objects.get(pk=artwork.pk) # Re-fetch for freshest data
-    current_artwork_status = artwork.auction_status
+    current_artwork_status = artwork.auction_status # This is the status from DB after effective check
     print(f"[DEBUG] 1. Initial status for '{artwork.title}': {current_artwork_status}")
 
     now = timezone.now()
     print(f"[DEBUG] Server 'now': {now}")
 
     effective_end_time = artwork.auction_scheduled_end_time
-    if not effective_end_time:
-        messages.error(request, f"Config Error for '{artwork.title}': Scheduled end time missing.")
+    if not effective_end_time and current_artwork_status == 'live': # Check if live AND missing end time
+        messages.error(request, f"Configuration Error for '{artwork.title}': Live auction is missing its scheduled end time.")
+        print(f"[DEBUG] Config Error: Live auction '{artwork.title}' missing scheduled_end_time.")
         return redirect('artworks:artwork_detail', slug=artwork.slug)
 
-    soft_close_extension_seconds = 3 * 60 
-    is_soft_close_active = False
-    if artwork.last_bid_time:
+    # Calculate soft close only if effective_end_time is set
+    is_soft_close_active = False 
+    if effective_end_time and artwork.last_bid_time:
+        soft_close_extension_seconds = 3 * 60 
         potential_soft_close_end = artwork.last_bid_time + timedelta(seconds=soft_close_extension_seconds)
         if potential_soft_close_end > effective_end_time:
-            effective_end_time = potential_soft_close_end
+            effective_end_time = potential_soft_close_end # Update effective_end_time for this request
             is_soft_close_active = True
     print(f"[DEBUG] Calculated effective_end_time for '{artwork.title}': {effective_end_time}")
 
-    # --- Attempt to finalize if time has passed and auction was live ---
-    if current_artwork_status == 'live' and now >= effective_end_time:
-        print(f"[DEBUG] 5. ENTERED FINALIZE BLOCK for '{artwork.title}': now ({now}) >= effective_end_time ({effective_end_time}) is TRUE.")
-        transaction_result = artwork.finalize_auction()
-        # artwork instance IS MODIFIED by finalize_auction and saved within it.
-        # So, artwork.auction_status, artwork.auction_winner etc. are now up-to-date.
-        current_artwork_status = artwork.auction_status # Update local variable
-        print(f"[DEBUG] 6. Status after finalize_auction for '{artwork.title}': {current_artwork_status}")
 
-        if current_artwork_status == 'ended_pending_payment' and transaction_result:
-            winner_username = artwork.auction_winner.username if artwork.auction_winner else "N/A"
-            msg = f"Auction for '{artwork.title}' has ended! Winner: {winner_username}."
+    # --- Attempt to finalize if time has passed and auction was live ---
+    if current_artwork_status == 'live' and effective_end_time and now >= effective_end_time:
+        print(f"[DEBUG] 5. ENTERED FINALIZE BLOCK for '{artwork.title}': now ({now}) >= effective_end_time ({effective_end_time}) is TRUE.")
+        
+        finalization_details = artwork.finalize_auction() 
+        # `artwork` instance is modified by finalize_auction (is_for_auction=False, status='not_configured')
+        # `finalization_details` is the dictionary returned by finalize_auction.
+
+        print(f"[DEBUG] 6. Status of artwork object after finalize_auction call: '{artwork.auction_status}'") 
+        print(f"[DEBUG] 6a. Details returned by finalize_auction(): {finalization_details}")
+
+        outcome_type = finalization_details.get('outcome')
+
+        if outcome_type == 'winner_found':
+            transaction_obj = finalization_details.get('transaction')
+            winner_user_obj = finalization_details.get('winner') 
             
-            if request.user.is_authenticated and artwork.auction_winner and request.user.id == artwork.auction_winner.id:
-                msg += " Please proceed to payment."
-                messages.success(request, msg)
-                print(f"[DEBUG] Finalize Block: Redirecting WINNER {request.user.username} to payment for transaction {transaction_result.id}")
-                return redirect('artworks:payment_and_dekont_upload', transaction_id=transaction_result.id)
-            else:
-                msg += " Awaiting payment from winner."
-                messages.success(request, msg)
-                print(f"[DEBUG] Finalize Block: Redirecting NON-WINNER {request.user.username if request.user.is_authenticated else 'Anon'} to artwork detail for '{artwork.title}'")
+            if not transaction_obj or not winner_user_obj:
+                messages.error(request, f"Auction for '{artwork.title}' ended, but there was an error processing the result. Please contact support.")
+                print(f"[DEBUG] Critical Error: 'winner_found' but transaction_obj ({transaction_obj}) or winner_user_obj ({winner_user_obj}) is missing.")
                 return redirect('artworks:artwork_detail', slug=artwork.slug)
-        elif current_artwork_status == 'failed_no_bids':
-            messages.info(request, f"Auction for '{artwork.title}' ended: No valid winning bids.")
-            print(f"[DEBUG] Finalize Block: Redirecting to artwork detail for '{artwork.title}' (failed_no_bids)")
+
+            winner_username = winner_user_obj.username
+            msg_for_redirect = f"Auction for '{artwork.title}' has ended! Winner: {winner_username}."
+            
+            if request.user.is_authenticated and request.user.id == winner_user_obj.id:
+                msg_for_redirect += " Congratulations! Please proceed to payment."
+                messages.success(request, msg_for_redirect)
+                print(f"[DEBUG] Finalize Block: Redirecting WINNER {request.user.username} to payment page for TxID: {transaction_obj.id}.")
+                return redirect('artworks:payment_and_dekont_upload', transaction_id=transaction_obj.id)
+            else:
+                msg_for_redirect += " Awaiting payment from winner."
+                messages.success(request, msg_for_redirect)
+                print(f"[DEBUG] Finalize Block: Redirecting NON-WINNER/OBSERVER '{request.user.username if request.user.is_authenticated else 'Anonymous'}' to artwork detail for '{artwork.title}'.")
+                return redirect('artworks:artwork_detail', slug=artwork.slug)
+        
+        elif outcome_type == 'no_bids':
+            messages.info(request, f"Auction for '{artwork.title}' ended: {finalization_details.get('message', 'No valid bids met the criteria.')}")
+            print(f"[DEBUG] Finalize Block: Outcome 'no_bids' for '{artwork.title}'. Redirecting to artwork detail.")
             return redirect('artworks:artwork_detail', slug=artwork.slug)
-        elif current_artwork_status == 'failed_payment':
-             messages.error(request, f"Auction for '{artwork.title}' ended with a transaction setup issue.")
-             print(f"[DEBUG] Finalize Block: Redirecting to artwork detail for '{artwork.title}' (failed_payment)")
+        
+        elif outcome_type == 'transaction_error':
+             messages.error(request, f"Auction for '{artwork.title}' ended with a transaction processing issue: {finalization_details.get('message', 'Please contact support.')}")
+             print(f"[DEBUG] Finalize Block: Outcome 'transaction_error' for '{artwork.title}'. Redirecting to artwork detail.")
              return redirect('artworks:artwork_detail', slug=artwork.slug)
-        elif current_artwork_status not in ['live']: 
-            messages.info(request, f"The auction for '{artwork.title}' has concluded (Status: {artwork.get_auction_status_display()}).")
-            print(f"[DEBUG] Finalize Block: Redirecting to artwork detail for '{artwork.title}' (concluded with status: {current_artwork_status})")
+        
+        elif outcome_type == 'already_concluded':
+            messages.info(request, f"The auction for '{artwork.title}' appears to have already concluded or was not live when checked for finalization.")
+            print(f"[DEBUG] Finalize Block: Outcome 'already_concluded' for '{artwork.title}'. Redirecting to artwork detail.")
             return redirect('artworks:artwork_detail', slug=artwork.slug)
+        
         else: 
-             print(f"[DEBUG] Warning: finalize_auction was called for '{artwork.title}' but status is still 'live'. Letting page render.")
-             # This case allows the page to render if, for some reason, finalize_auction didn't change status from 'live'
-    else: # Finalize block was skipped
+             print(f"[DEBUG] Warning: finalize_auction for '{artwork.title}' returned an unexpected outcome: '{outcome_type}'. "
+                   f"Message: {finalization_details.get('message')}. Current artwork status from object: {artwork.auction_status}")
+    else: 
         print(f"[DEBUG] 5. SKIPPED FINALIZE BLOCK for '{artwork.title}'.")
         if current_artwork_status != 'live': print(f"  - Reason: Status is '{current_artwork_status}', not 'live'.")
         if effective_end_time and now < effective_end_time: print(f"  - Reason: now ({now}) < effective_end_time ({effective_end_time}). Remaining: {effective_end_time - now}")
     
     # --- Post-Finalization Check & Permission Logic ---
-    # current_artwork_status variable should reflect the true state after any finalization attempt above.
-    print(f"[DEBUG] 7. Status before render/permission checks for '{artwork.title}': {current_artwork_status}")
+    current_artwork_status_for_render = artwork.auction_status 
+    print(f"[DEBUG] 7. Status before render/permission checks for '{artwork.title}': {current_artwork_status_for_render}")
 
-    # If auction just ended and this user is the winner, and they weren't redirected from the block above
-    # (e.g., they refreshed the page after it was finalized by another request/process)
-    if current_artwork_status == 'ended_pending_payment':
-        print(f"[DEBUG] Post-finalize state: Status is 'ended_pending_payment' for '{artwork.title}'.")
-        if artwork.auction_winner and request.user.is_authenticated and request.user.id == artwork.auction_winner.id:
-            try:
-                # Try to find the transaction that should have been created by finalize_auction
-                win_transaction = Transaction.objects.get(artwork=artwork, buyer=artwork.auction_winner, sale_type='auction_win')
-                # Check if this transaction is still pending payment (it should be)
-                if win_transaction.status == 'pending_payment':
-                    messages.success(request, f"You won the auction for '{artwork.title}'! Please proceed to payment.")
-                    print(f"[DEBUG] Post-finalize state: Redirecting WINNER {request.user.username} to payment for transaction {win_transaction.id}")
-                    return redirect('artworks:payment_and_dekont_upload', transaction_id=win_transaction.id)
-                else:
-                    # Winner, but transaction is not pending_payment (e.g. already approved/rejected). They see the rendered page.
-                    print(f"[DEBUG] Post-finalize state: Winner {request.user.username}, but transaction {win_transaction.id} status is {win_transaction.status}. Rendering page.")
-            except Transaction.DoesNotExist:
-                messages.error(request, "Error: Winning transaction details not found. Please contact support.")
-                print(f"[DEBUG] Post-finalize state: ERROR - Winning transaction not found for winner {artwork.auction_winner.username} on '{artwork.title}'")
-                return redirect('artworks:artwork_detail', slug=artwork.slug) 
-            except Transaction.MultipleObjectsReturned:
-                messages.error(request, "Error: System error regarding your win. Please contact support.")
-                print(f"[DEBUG] Post-finalize state: ERROR - Multiple transactions for winner {artwork.auction_winner.username} on '{artwork.title}'")
-                return redirect('artworks:artwork_detail', slug=artwork.slug)
-        # If not the winner, or if winner but transaction not pending_payment, they will see the rendered bidding page showing auction ended.
+    if current_artwork_status_for_render == 'not_configured' and not artwork.is_for_auction: 
+        print(f"[DEBUG] Post-finalize state: Status is 'not_configured' and is_for_auction=False for '{artwork.title}'. This means auction concluded.")
+        
+        if request.user.is_authenticated:
+            winning_transaction = Transaction.objects.filter(
+                artwork=artwork, buyer=request.user, sale_type='auction_win', status='pending_payment'
+            ).order_by('-initiated_at').first()
 
-    # If auction is no longer suitable for active bidding display (and not handled by a redirect yet)
-    if current_artwork_status not in ['live', 'ended_pending_payment']:
-        print(f"[DEBUG] 8. Redirecting from bidding page for '{artwork.title}' as status '{current_artwork_status}' is not live/ended_pending_payment for display.")
-        messages.info(request, f"The auction for '{artwork.title}' is not currently active for bidding (Status: {artwork.get_auction_status_display()}).")
+            if winning_transaction:
+                has_congrats_message = any("Congratulations! You won the auction" in m.message for m in messages.get_messages(request))
+                if not has_congrats_message:
+                    messages.success(request, f"Congratulations! You won the auction for '{artwork.title}'. Please proceed to payment.")
+                print(f"[DEBUG] Post-finalize state: Redirecting WINNER {request.user.username} to payment page for TxID: {winning_transaction.id} (found via Transaction query).")
+                return redirect('artworks:payment_and_dekont_upload', transaction_id=winning_transaction.id)
+            else:
+                print(f"[DEBUG] Post-finalize state: User {request.user.username} is not the winner with a PENDING payment for '{artwork.title}'.")
+        
+        has_any_relevant_message = any(m.level >= messages.INFO for m in messages.get_messages(request))
+        if not has_any_relevant_message:
+            messages.info(request, f"The auction for '{artwork.title}' has concluded.")
+        
+        print(f"[DEBUG] Post-finalize state: Redirecting to artwork detail page for '{artwork.title}' (general concluded path).")
         return redirect('artworks:artwork_detail', slug=artwork.slug)
 
-    # --- Prepare for Rendering Bidding Page (if still live or just ended for viewing) ---
-    user_registration = artwork.get_user_auction_registration(request.user)
-    is_approved_attendee = user_registration and user_registration.status == 'approved'
-    is_owner = artwork.current_owner == request.user
-    print(f"[DEBUG] 9. Permissions for '{artwork.title}': approved_attendee={is_approved_attendee}, is_owner={is_owner}")
+    if current_artwork_status_for_render != 'live':
+        print(f"[DEBUG] 8. Redirecting from bidding page for '{artwork.title}' as status '{current_artwork_status_for_render}' is not 'live'.")
+        has_any_message = any(m.level >= messages.INFO for m in messages.get_messages(request))
+        if not has_any_message:
+            messages.info(request, f"The auction for '{artwork.title}' is not currently active for bidding (Status: {artwork.get_auction_status_display()}).")
+        return redirect('artworks:artwork_detail', slug=artwork.slug)
+
+    # --- If we reach here, auction is 'live' for rendering ---
+    # --- Define permission variables BEFORE using them ---
+    user_registration = None
+    is_approved_attendee = False
+    is_owner = False 
+
+    if request.user.is_authenticated: 
+        user_registration = artwork.get_user_auction_registration(request.user)
+        is_approved_attendee = user_registration and user_registration.status == 'approved'
+        is_owner = artwork.current_owner == request.user
+    
+    print(f"[DEBUG] 9. Permissions for '{artwork.title}': approved_attendee={is_approved_attendee}, is_owner={is_owner}, user_authenticated={request.user.is_authenticated}")
 
     if not is_approved_attendee and not is_owner: 
         print(f"[DEBUG] 10. Redirecting from bidding page for '{artwork.title}' (not approved and not owner)")
-        messages.error(request, "You are not an approved attendee for this auction.")
+        if request.user.is_authenticated:
+            messages.error(request, "You are not an approved attendee for this auction.")
+        else:
+            messages.info(request, f"Please log in to participate. The auction for '{artwork.title}' is currently live.")
         return redirect('artworks:artwork_detail', slug=artwork.slug)
 
-    highest_bid_obj = Bid.objects.filter(artwork=artwork).order_by('-amount', '-timestamp').first()
-    current_highest_bid_amount = highest_bid_obj.amount if highest_bid_obj else None
-    current_highest_bidder = highest_bid_obj.bidder if highest_bid_obj else None
+    # --- Prepare for Rendering Live Bidding Page ---
+    current_highest_bid_amount = artwork.auction_current_highest_bid
+    current_highest_bidder_user_obj = artwork.auction_current_highest_bidder
     
     min_next_bid = None
     if current_highest_bid_amount is not None:
         min_next_bid = current_highest_bid_amount + Decimal('1.00')
     elif artwork.auction_minimum_bid is not None:
         min_next_bid = artwork.auction_minimum_bid
+    else: # Fallback if somehow minimum_bid is also None (should not happen for live auction)
+        min_next_bid = Decimal('1.00') 
     
     bid_form = None
     auction_end_message = None 
     time_remaining_seconds = 0 
 
-    if current_artwork_status == 'live': 
-        if is_approved_attendee and not is_owner:
-            form_initial_bid = min_next_bid.quantize(Decimal('0.01')) if min_next_bid else None
-            bid_form = PlaceBidForm(initial={'bid_amount': form_initial_bid })
-        
-        if effective_end_time and now < effective_end_time: # Recalculate based on current 'now'
-             current_time_remaining_delta = effective_end_time - now
-             time_remaining_seconds = max(0, int(current_time_remaining_delta.total_seconds()))
-        else: 
-             time_remaining_seconds = 0
-             if not auction_end_message: 
-                  auction_end_message = "Auction has ended." # General message if not set by finalize
-    elif current_artwork_status == 'ended_pending_payment':
-        winner_username_display = artwork.auction_winner.username if artwork.auction_winner else 'N/A'
-        auction_end_message = f"Auction ended! Winner: {winner_username_display}. Awaiting payment."
-        bid_form = None # No bidding form if auction has ended
-
-    quick_bid_amounts = [] # Calculate quick bids as before
-    if current_artwork_status == 'live' and min_next_bid is not None : 
+    if is_approved_attendee and not is_owner: # Bid form only for approved, non-owner bidders on a live auction
+        form_initial_bid = min_next_bid.quantize(Decimal('0.01'))
+        bid_form = PlaceBidForm(initial={'bid_amount': form_initial_bid })
+    
+    if effective_end_time and now < effective_end_time: 
+         current_time_remaining_delta = effective_end_time - now
+         time_remaining_seconds = max(0, int(current_time_remaining_delta.total_seconds()))
+             
+    quick_bid_amounts = [] 
+    if min_next_bid is not None and is_approved_attendee and not is_owner: 
         base_for_quick_bids_val = min_next_bid
-        quick_bid_amounts.append(base_for_quick_bids_val)
-        quick_bid_amounts.append(base_for_quick_bids_val + Decimal('10.00'))
-        quick_bid_amounts.append(base_for_quick_bids_val + Decimal('50.00'))
-        quick_bid_amounts.append(base_for_quick_bids_val + Decimal('100.00'))
+        temp_bids = [
+            base_for_quick_bids_val,
+            base_for_quick_bids_val + Decimal('10.00'),
+            base_for_quick_bids_val + Decimal('50.00'),
+            base_for_quick_bids_val + Decimal('100.00')
+        ]
         valid_quick_bids = []
         auction_abs_min_bid = artwork.auction_minimum_bid if artwork.auction_minimum_bid is not None else Decimal('0.01')
-        current_high_for_check = current_highest_bid_amount if current_highest_bid_amount is not None else Decimal('-1.00')
-        for qb_decimal in sorted(list(set(quick_bid_amounts))):
+        current_high_for_check = artwork.auction_current_highest_bid if artwork.auction_current_highest_bid is not None else Decimal('-1.00')
+
+        for qb_decimal in sorted(list(set(temp_bids))):
             if qb_decimal > current_high_for_check and qb_decimal >= auction_abs_min_bid:
                 valid_quick_bids.append(qb_decimal.quantize(Decimal('0.01')))
         quick_bid_amounts = valid_quick_bids[:4]
     
-    print(f"[DEBUG] 11. Preparing to render bidding page for '{artwork.title}'. Status: {current_artwork_status}, Time Rem: {time_remaining_seconds}s, BidForm: {'Yes' if bid_form else 'No'}")
+    print(f"[DEBUG] 11. Preparing to render bidding page for '{artwork.title}'. Status: {current_artwork_status_for_render}, Time Rem: {time_remaining_seconds}s, BidForm: {'Yes' if bid_form else 'No'}")
+    
     context = {
-        'artwork': artwork, 'bid_form': bid_form, 
-        'current_highest_bid': current_highest_bid_amount, 'current_highest_bidder': current_highest_bidder,
-        'min_next_bid': min_next_bid, 'is_approved_attendee': is_approved_attendee, 'is_owner': is_owner,
-        'time_remaining_seconds': time_remaining_seconds, 'auction_end_message': auction_end_message,
-        'is_soft_close_active': is_soft_close_active, 'effective_end_time_for_display': effective_end_time, 
-        'quick_bid_amounts': quick_bid_amounts, 'page_title': f"Live Bidding: {artwork.title}"
+        'artwork': artwork, 
+        'bid_form': bid_form, 
+        'current_highest_bid': current_highest_bid_amount, 
+        'current_highest_bidder_username': current_highest_bidder_user_obj.username if current_highest_bidder_user_obj else None,
+        'min_next_bid': min_next_bid, 
+        'is_approved_attendee': is_approved_attendee, 
+        'is_owner': is_owner,
+        'time_remaining_seconds': time_remaining_seconds, 
+        'auction_end_message': auction_end_message,
+        'is_soft_close_active': is_soft_close_active, 
+        'effective_end_time_for_display': effective_end_time, 
+        'quick_bid_amounts': quick_bid_amounts, 
+        'page_title': f"Live Bidding: {artwork.title}"
     }
     return render(request, 'artworks/auction_bidding_page.html', context)
-
 @login_required
 @db_transaction.atomic
 def place_bid_view(request, artwork_slug): # MODIFIED

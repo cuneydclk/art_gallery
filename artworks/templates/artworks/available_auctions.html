@@ -116,7 +116,7 @@
                                     <a href="{% url 'artworks:artwork_detail' item.artwork.slug %}#auction-signup" class="btn-register">Sign Up for Auction</a>
                                     <!-- We'll add a #auction-signup anchor later to artwork_detail -->
                                 {% elif item.artwork.auction_status == 'live' and item.registration and item.registration.status == 'approved' %}
-                                    <a href="#" class="btn-view-auction">Go to Bidding Page (Placeholder)</a>
+                                    <a href="{% url 'artworks:auction_bidding_page' item.artwork.slug %}" class="btn-view-auction">Go to Bidding Page</a>
                                 {% elif item.artwork.auction_status == 'live' and not item.registration %}
                                      <p><small>Bidding is live. Registration window closed.</small></p>
                                 {% elif item.artwork.auction_status == 'live' and item.registration and item.registration.status != 'approved' %}
