@@ -13,48 +13,29 @@ class Artwork(models.Model):
     slug = models.SlugField(max_length=255, unique=True, blank=True, help_text="Unique URL-friendly identifier. Leave blank to auto-generate from title.")
     description = models.TextField()
     image_placeholder_url = models.URLField(max_length=500, blank=True, null=True, help_text="URL to a placeholder image for now.")
-    
     current_owner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="owned_artworks")
-    
-    # Direct Sale Status
     is_for_sale_direct = models.BooleanField(default=False)
     direct_sale_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    
-    # Auction Status & Settings
+
     AUCTION_STATUS_CHOICES = [
-        ('draft', 'Draft'), # Not yet configured or explicitly set as draft
-        ('pending_signup_window', 'Pending Sign-up Window'), # Configured, sign-up window not yet open
-        ('signup_open', 'Sign-up Open'), # Actively accepting registrations
-        ('awaiting_attendee_approval', 'Awaiting Attendee Approval'), # Sign-up window closed, owner reviews
-        ('ready_to_start', 'Ready to Start'), # Approvals done, waiting for auction_start_time
-        ('live', 'Live'), # Auction is currently active
-        ('ended_pending_payment', 'Ended - Pending Payment'), # Winner declared, waiting for payment
-        ('completed', 'Completed'), # Payment approved, artwork transferred
-        ('cancelled_by_owner', 'Cancelled by Owner'), # Owner cancelled the auction
-        ('failed_no_bids', 'Failed - No Bids/No Winner'), # Auction ended, no valid bids
-        ('failed_payment', 'Failed - Payment Issue'), # Winner failed to pay
+        ('not_configured', 'Not Configured'),
+        ('draft', 'Draft'), # Owner is configuring, might be incomplete.
+        ('configured', 'Configured / Upcoming'), # All settings present, awaiting time-based transition.
+        ('signup_open', 'Sign-up Open'),
+        ('awaiting_start', 'Awaiting Start'), # Sign-up closed, auction start time not yet reached.
+        ('live', 'Live Auction'),
     ]
     is_for_auction = models.BooleanField(default=False)
-    auction_start_time = models.DateTimeField(null=True, blank=True, help_text="Date and time when the auction bidding begins.")
-    auction_scheduled_end_time = models.DateTimeField(null=True, blank=True, help_text="Scheduled date and time for the auction to end (can be extended by new bids).")
-    auction_minimum_bid = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Minimum starting bid.")
-    
-    auction_signup_offset_minutes = models.PositiveIntegerField(
-        default=30, 
-        help_text="Users must sign up at least this many minutes before the auction_start_time. Registration window closes at (auction_start_time - offset)."
-    )
-    auction_signup_deadline = models.DateTimeField(null=True, blank=True, editable=False, help_text="Calculated: Time by which users must register.")
-    
-    auction_status = models.CharField(max_length=30, choices=AUCTION_STATUS_CHOICES, default='draft')
-    
-    # Auction Runtime Fields (updated during live auction)
-    auction_current_highest_bid = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, editable=False) # Denormalized for quick display
-    auction_current_highest_bidder = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="current_bids_on", editable=False) # Denormalized
-    last_bid_time = models.DateTimeField(null=True, blank=True, help_text="Timestamp of the last valid bid placed.", editable=False)
-    
-    # Auction Outcome
-    auction_winner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="won_auctions", editable=False)
-    auction_winning_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, editable=False)
+    auction_start_time = models.DateTimeField(null=True, blank=True)
+    auction_scheduled_end_time = models.DateTimeField(null=True, blank=True)
+    auction_minimum_bid = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    auction_signup_offset_minutes = models.PositiveIntegerField(default=30)
+    auction_signup_deadline = models.DateTimeField(null=True, blank=True, editable=False) # Calculated
+    auction_status = models.CharField(max_length=30, choices=AUCTION_STATUS_CHOICES, default='not_configured')
+
+    auction_current_highest_bid = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, editable=False)
+    auction_current_highest_bidder = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="active_bids_on", editable=False)
+    last_bid_time = models.DateTimeField(null=True, blank=True, editable=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -67,256 +48,241 @@ class Artwork(models.Model):
             self.slug = slugify(self.title)
             original_slug = self.slug
             counter = 1
-            while Artwork.objects.filter(slug=self.slug).exclude(pk=self.pk).exists():
+            while Artwork.objects.filter(slug=self.slug).exclude(pk=self.pk if self.pk else None).exists():
                 self.slug = f'{original_slug}-{counter}'
                 counter += 1
-        
-        # Calculate signup deadline if auction times are set
-        if self.is_for_auction and self.auction_start_time and self.auction_signup_offset_minutes is not None:
-            self.auction_signup_deadline = self.auction_start_time - timedelta(minutes=self.auction_signup_offset_minutes)
-        else:
-            self.auction_signup_deadline = None
 
-        # Basic logic: if not for auction, clear auction fields (can be expanded)
-        if not self.is_for_auction:
+        # Determine original state if updating an existing artwork
+        original_is_for_auction = False
+        original_auction_status = 'not_configured' # Default for new or un-auctioned items
+        if self.pk: # If this is an update to an existing object
+            try:
+                # Fetch only the fields needed to avoid recursion if other fields trigger signals/saves
+                original_data = Artwork.objects.only('is_for_auction', 'auction_status').get(pk=self.pk)
+                original_is_for_auction = original_data.is_for_auction
+                original_auction_status = original_data.auction_status
+            except Artwork.DoesNotExist:
+                pass # Should not happen if self.pk exists, but good practice
+
+        if self.is_for_auction:
+            # === Auction is ON ===
+            # 1. Calculate signup deadline (must be done before status decisions)
+            if self.auction_start_time and self.auction_signup_offset_minutes is not None:
+                self.auction_signup_deadline = self.auction_start_time - timedelta(minutes=self.auction_signup_offset_minutes)
+            else:
+                self.auction_signup_deadline = None # Essential times for deadline calc are missing
+
+            # 2. Determine initial/base auction_status
+            #    - If it's being newly enabled OR was previously not properly configured ('not_configured', 'draft')
+            #    - AND all required auction times are now set.
+            #    Then, set to 'configured'. This is the clean state from which get_effective_auction_status_and_save will transition.
+            if (not original_is_for_auction or original_auction_status in ['not_configured', 'draft']) and \
+               self.auction_start_time and self.auction_scheduled_end_time and self.auction_minimum_bid is not None:
+                print(f"[Artwork Save DEBUG] '{self.title}': Setting auction_status to 'configured'. "
+                      f"Was: original_is_for_auction={original_is_for_auction}, original_status='{original_auction_status}'.")
+                self.auction_status = 'configured'
+            elif not (self.auction_start_time and self.auction_scheduled_end_time and self.auction_minimum_bid is not None):
+                # If critical auction settings are missing, but is_for_auction is true,
+                # set to 'draft' unless it's already in an active state.
+                # Active states ('signup_open', 'awaiting_start', 'live') should not be regressed by this basic save.
+                if self.auction_status not in ['signup_open', 'awaiting_start', 'live']:
+                    print(f"[Artwork Save DEBUG] '{self.title}': Critical auction times/bid missing, setting to 'draft'. Current status: {self.auction_status}")
+                    self.auction_status = 'draft'
+            # If it's already in an active state ('signup_open', 'awaiting_start', 'live'),
+            # this save() won't change the status. get_effective_auction_status_and_save() or finalize_auction() handles those.
+
+            # 3. Ensure direct sale is off
+            if self.is_for_sale_direct:
+                self.is_for_sale_direct = False
+                self.direct_sale_price = None
+                print(f"[Artwork Save DEBUG] '{self.title}': Turned off direct sale because auction is active.")
+
+        else:
+            # === Auction is OFF ===
+            if original_is_for_auction: # Only log and reset if it *was* for auction
+                print(f"[Artwork Save DEBUG] '{self.title}': is_for_auction is now False. Resetting all auction fields.")
+
             self.auction_start_time = None
             self.auction_scheduled_end_time = None
             self.auction_minimum_bid = None
-            self.auction_status = 'draft' 
-            # Clear other auction-related fields as necessary
+            # self.auction_signup_offset_minutes = self._meta.get_field('auction_signup_offset_minutes').default # Optionally reset to default
+            self.auction_signup_deadline = None
+            self.auction_status = 'not_configured' # Definitive state for no auction
             self.auction_current_highest_bid = None
             self.auction_current_highest_bidder = None
             self.last_bid_time = None
-            self.auction_winner = None
-            self.auction_winning_price = None
-        
-        super().save(*args, **kwargs)
+
+        super().save(*args, **kwargs) # Call the "real" save() method.
 
     class Meta:
         ordering = ['-created_at']
 
-    @property
-    def is_auction_signup_active(self):
-        """Checks if the auction sign-up window is currently open."""
-        if not self.is_for_auction or not self.auction_start_time or not self.auction_signup_deadline:
-            return False
-        now = timezone.now()
-        # Check status first, then time for robustness
-        if self.auction_status != 'signup_open':
-            return False
-        return now < self.auction_signup_deadline
-    
-    @property
-    def is_auction_live_now(self):
-        """Checks if the auction is currently live based on status."""
-        # More complex time checks can be added if status management is not perfectly immediate
-        return self.is_for_auction and self.auction_status == 'live'
+    # ... (Keep all @property methods: is_auction_signup_open_now, is_auction_live_now, etc.) ...
+    # ... (Keep get_effective_auction_status_and_save, can_user_register_for_auction, get_user_auction_registration, finalize_auction, cancel_auction_by_owner) ...
+    # Make sure these methods are correctly indented under the Artwork class.
+    # For brevity, I'm omitting them here, but they should remain as they were in the previous complete solution.
+    # I will provide the FULL Artwork class again in the next step if that's easier.
 
     @property
+    def is_auction_signup_open_now(self):
+        if not self.is_for_auction or self.auction_status != 'signup_open': return False
+        now = timezone.now()
+        return self.auction_signup_deadline and now < self.auction_signup_deadline
+
+    @property
+    def is_auction_live_now(self):
+        return self.is_for_auction and self.auction_status == 'live'
+    
+    @property
     def time_until_auction_starts(self):
-        """Returns timedelta until auction starts, or None if not applicable/started."""
         if self.is_for_auction and self.auction_start_time and \
-           self.auction_status not in ['live', 'ended_pending_payment', 'completed', 'failed_no_bids', 'failed_payment', 'cancelled_by_owner']:
+           self.auction_status in ['configured', 'signup_open', 'awaiting_start']:
             now = timezone.now()
-            if self.auction_start_time > now:
-                return self.auction_start_time - now
+            if self.auction_start_time > now: return self.auction_start_time - now
         return None
 
     @property
     def time_until_signup_deadline(self):
-        """Returns timedelta until signup deadline, or None if not applicable/passed."""
         if self.is_for_auction and self.auction_signup_deadline and self.auction_status == 'signup_open':
             now = timezone.now()
-            if self.auction_signup_deadline > now:
-                return self.auction_signup_deadline - now
+            if self.auction_signup_deadline > now: return self.auction_signup_deadline - now
         return None
     
     def get_effective_auction_status_and_save(self):
-        """
-        Updates the auction status based on current time and existing status.
-        This should be called periodically (e.g., by a task or before displaying status)
-        to ensure statuses like 'live' or 'awaiting_attendee_approval' are set correctly.
-        Returns the current (possibly updated) status string.
-        """
-        if not self.is_for_auction: # If not for auction at all
-            if self.auction_status != 'draft':
-                self.auction_status = 'draft'
-                # Consider clearing other auction fields here too, though model save also does it
-                self.save(update_fields=['auction_status'])
+        if not self.is_for_auction:
+            if self.auction_status != 'not_configured':
+                self.auction_status = 'not_configured'
+                super(Artwork, self).save(update_fields=['auction_status']) 
             return self.auction_status
 
         now = timezone.now()
-        original_status = self.auction_status
-        changed_fields = []
+        original_status = str(self.auction_status) # Make a copy for comparison
+        changed_fields = [] 
 
-        # Only proceed with time-based transitions if the auction is in a state that expects them
-        if self.auction_status in ['pending_signup_window', 'signup_open', 'awaiting_attendee_approval', 'ready_to_start']:
-            if self.auction_start_time and self.auction_signup_deadline: # Ensure core times are set
-                if self.auction_status == 'pending_signup_window':
-                    # Logic to transition from pending_signup_window to signup_open
-                    # This depends on when you want signups to officially open.
-                    # For now, assume it's handled by admin/owner setting it to 'signup_open' or
-                    # if now is after some predefined "signup_opens_at" time (not yet implemented)
-                    # and before auction_signup_deadline.
-                    # Let's assume if it's pending, and deadline is in future, it becomes signup_open
-                    if now < self.auction_signup_deadline: # A simplified condition
-                         self.auction_status = 'signup_open'
-
-                if self.auction_status == 'signup_open':
-                    if now >= self.auction_signup_deadline:
-                        self.auction_status = 'awaiting_attendee_approval'
-                
-                elif self.auction_status == 'awaiting_attendee_approval':
-                    # This status typically changes based on owner actions (approving attendees).
-                    # It could auto-transition to 'ready_to_start' if all are reviewed,
-                    # or if start time is very close.
-                    # For now, this method won't auto-transition out of it without owner action.
-                    # However, if somehow it's in this state and start time passes, it should go live.
-                    if now >= self.auction_start_time:
-                        self.auction_status = 'live'
-
-
-                elif self.auction_status == 'ready_to_start': # Owner has finalized approvals
-                    if now >= self.auction_start_time:
-                        self.auction_status = 'live'
-            else: # Core times not set, ensure it's draft if not already some end-state
-                if self.auction_status not in ['draft', 'completed', 'failed_no_bids', 'failed_payment', 'cancelled_by_owner']:
-                    self.auction_status = 'draft'
+        expected_deadline = None
+        if self.auction_start_time and self.auction_signup_offset_minutes is not None:
+            expected_deadline = self.auction_start_time - timedelta(minutes=self.auction_signup_offset_minutes)
         
-        # If auction status has changed from its original value during this check
-        if original_status != self.auction_status:
-            changed_fields.append('auction_status')
+        if self.auction_signup_deadline != expected_deadline:
+            self.auction_signup_deadline = expected_deadline
+            if 'auction_signup_deadline' not in changed_fields: changed_fields.append('auction_signup_deadline')
+
+        current_status_before_change = str(self.auction_status) # For logging
+
+        if self.auction_start_time and self.auction_signup_deadline:
+            new_status = current_status_before_change
+
+            if current_status_before_change == 'configured':
+                if now < self.auction_signup_deadline: new_status = 'signup_open'
+                elif now < self.auction_start_time: new_status = 'awaiting_start'
+                else: new_status = 'live'
+            elif current_status_before_change == 'signup_open':
+                if now >= self.auction_signup_deadline:
+                    if now < self.auction_start_time: new_status = 'awaiting_start'
+                    else: new_status = 'live'
+            elif current_status_before_change == 'awaiting_start':
+                if now >= self.auction_start_time: new_status = 'live'
+            
+            if self.auction_status != new_status:
+                self.auction_status = new_status
+                if 'auction_status' not in changed_fields: changed_fields.append('auction_status')
         
-        # Always ensure signup deadline is current if auction is on and start time is set
-        # This is also handled in the main save, but good to be explicit if we save here
-        if self.is_for_auction and self.auction_start_time and self.auction_signup_offset_minutes is not None:
-            new_deadline = self.auction_start_time - timedelta(minutes=self.auction_signup_offset_minutes)
-            if self.auction_signup_deadline != new_deadline:
-                self.auction_signup_deadline = new_deadline
-                if 'auction_signup_deadline' not in changed_fields:
-                    changed_fields.append('auction_signup_deadline')
+        elif self.is_for_auction and self.auction_status not in ['not_configured', 'draft', 'live']:
+             if self.auction_status in ['configured', 'signup_open', 'awaiting_start'] and \
+                not (self.auction_start_time and self.auction_scheduled_end_time):
+                 print(f"[EFFECTIVE_STATUS WARNING] Artwork '{self.title}': Status '{self.auction_status}' "
+                       f"but critical times missing. Reverting to 'draft'.")
+                 self.auction_status = 'draft'
+                 if 'auction_status' not in changed_fields: changed_fields.append('auction_status')
 
         if changed_fields:
-            self.save(update_fields=changed_fields) 
-            print(f"Artwork '{self.title}': Auction state updated. Status: '{self.auction_status}', Deadline: '{self.auction_signup_deadline}'. Changed fields: {changed_fields}")
-
+            # Important: Use super().save to avoid recursion if save() is overridden
+            # and to specifically update only these fields.
+            super(Artwork, self).save(update_fields=changed_fields) 
+            print(f"[EFFECTIVE_STATUS] Artwork '{self.title}': Status changed from '{original_status}' to '{self.auction_status}'. Saved fields: {changed_fields}")
+        
         return self.auction_status
 
+
     def can_user_register_for_auction(self, user):
-        if not user or not user.is_authenticated:
-            return False
-        
-        # Call get_effective_auction_status_and_save to ensure status is current
-        # self.get_effective_auction_status_and_save() # Be careful with recursive saves if called from save() itself.
-                                                    # Better to call this explicitly in views before checking.
-
-        if self.auction_status != 'signup_open': # Rely on the (potentially updated) status
-            return False
-            
-        now = timezone.now()
-        if not self.auction_signup_deadline or now >= self.auction_signup_deadline: # Double check deadline
-            return False
-
-        if self.current_owner == user: 
-            return False
-        
-        from artworks.models import AuctionRegistration # Local import to avoid circularity
-        if AuctionRegistration.objects.filter(artwork=self, user=user).exists():
-            return False 
+        if not user or not user.is_authenticated: return False
+        if self.auction_status != 'signup_open': return False
+        if self.auction_signup_deadline and timezone.now() >= self.auction_signup_deadline: return False
+        if self.current_owner == user: return False
+        from artworks.models import AuctionRegistration # Local import for model methods
+        if AuctionRegistration.objects.filter(artwork=self, user=user).exists(): return False 
         return True
 
     def get_user_auction_registration(self, user):
-        if not user or not user.is_authenticated:
-            return None
-        from artworks.models import AuctionRegistration 
-        try:
-            return AuctionRegistration.objects.get(artwork=self, user=user)
-        except AuctionRegistration.DoesNotExist:
-            return None
+        if not user or not user.is_authenticated: return None
+        from artworks.models import AuctionRegistration # Local import
+        try: return AuctionRegistration.objects.get(artwork=self, user=user)
+        except AuctionRegistration.DoesNotExist: return None
         
     def finalize_auction(self):
-        print(f"[finalize_auction] Called for: {self.title}, Current Status: {self.auction_status}")
+        print(f"[finalize_auction] Called for: '{self.title}', Current Status: {self.auction_status}")
 
-        # Prevent re-finalizing if already in a terminal auction state
-        if self.auction_status in ['ended_pending_payment', 'completed', 'failed_no_bids', 'failed_payment', 'cancelled_by_owner']:
-            print(f"[finalize_auction] Auction '{self.title}' already in a terminal state: {self.auction_status}. No action.")
-            # Return existing transaction if applicable, or None
-            if self.auction_status == 'ended_pending_payment' and self.auction_winner:
-                try:
-                    # Attempt to find the transaction associated with this win
-                    return Transaction.objects.get(artwork=self, buyer=self.auction_winner, sale_type='auction_win')
-                except Transaction.DoesNotExist:
-                    return None # Should not happen if status is ended_pending_payment correctly
-            return None
-
-        # This method assumes the *time* for auction end has passed.
-        # It now focuses on determining outcome based on bids.
+        if self.auction_status != 'live':
+            if not self.is_for_auction:
+                 print(f"[finalize_auction] Auction '{self.title}' is already fully concluded (is_for_auction=False).")
+                 return {'outcome': 'already_concluded'}
+            if self.auction_scheduled_end_time and timezone.now() >= self.auction_scheduled_end_time:
+                 print(f"[finalize_auction] Non-live auction '{self.title}' (status {self.auction_status}) passed scheduled end. Resetting.")
+                 self.is_for_auction = False 
+                 self.save() # Triggers full reset via main save()
+                 return {'outcome': 'no_bids', 'message': 'Auction ended before going live or without bids.'}
+            else:
+                print(f"[finalize_auction] Auction '{self.title}' (status {self.auction_status}) is not live and has not passed scheduled end.")
+                return {'outcome': 'not_live_or_not_ended', 'message': 'Auction not live or end time not reached.'}
 
         highest_bid = Bid.objects.filter(artwork=self).order_by('-amount', '-timestamp').first()
-        
-        original_status_before_finalize = self.auction_status # For debugging/logging
-        changed_fields_artwork = []
+        outcome_data = {'outcome': 'no_bids', 'message': 'No bids met the criteria.'} 
 
         if highest_bid and self.auction_minimum_bid is not None and highest_bid.amount >= self.auction_minimum_bid:
-            print(f"[finalize_auction] Winning bid found for '{self.title}': {highest_bid.amount} by {highest_bid.bidder.username}")
-            self.auction_status = 'ended_pending_payment'
-            self.auction_winner = highest_bid.bidder
-            self.auction_winning_price = highest_bid.amount
-            
-            changed_fields_artwork.extend(['auction_status', 'auction_winner', 'auction_winning_price'])
-            
-            if self.current_owner and self.auction_winner:
+            print(f"[finalize_auction] Winning bid for '{self.title}': {highest_bid.amount} by {highest_bid.bidder.username}")
+            if self.current_owner and highest_bid.bidder:
+                from artworks.models import Transaction # Local import
                 try:
-                    # Using get_or_create makes this method more idempotent regarding transaction creation
                     transaction_obj, created = Transaction.objects.get_or_create(
-                        artwork=self,
-                        buyer=self.auction_winner,
-                        seller=self.current_owner, 
-                        sale_type='auction_win', # Key for uniqueness with artwork & buyer for an auction
-                        defaults={
-                            'final_price': self.auction_winning_price,
-                            'status': 'pending_payment'
-                        }
+                        artwork=self, buyer=highest_bid.bidder, seller=self.current_owner, 
+                        sale_type='auction_win',
+                        defaults={'final_price': highest_bid.amount, 'status': 'pending_payment'}
                     )
-                    if created:
-                        print(f"[finalize_auction] Transaction CREATED for '{self.title}'. ID: {transaction_obj.id}")
-                    else:
-                        print(f"[finalize_auction] Transaction already EXISTED for '{self.title}'. ID: {transaction_obj.id}, Status: {transaction_obj.status}")
-                        # If transaction existed, ensure its price is correct (shouldn't change for auction win)
-                        if transaction_obj.final_price != self.auction_winning_price:
-                            transaction_obj.final_price = self.auction_winning_price
-                            transaction_obj.save(update_fields=['final_price'])
-                        # If it existed and was, e.g., 'cancelled', this logic doesn't automatically reopen it.
-                        # This might need more complex handling if an auction can be "re-won" by the same person
-                        # after a previous transaction failed. For now, get_or_create is good.
-
-                    self.save(update_fields=changed_fields_artwork)
-                    print(f"[finalize_auction] Artwork '{self.title}' saved. New status: {self.auction_status}")
-                    return transaction_obj
+                    if created: print(f"[finalize_auction] Transaction CREATED for '{self.title}'. ID: {transaction_obj.id}")
+                    else: print(f"[finalize_auction] Transaction already EXISTED for '{self.title}'. ID: {transaction_obj.id}.")
+                    
+                    outcome_data = {
+                        'outcome': 'winner_found', 'transaction': transaction_obj, 
+                        'winner': highest_bid.bidder, 'price': highest_bid.amount,
+                        'message': f'Winner: {highest_bid.bidder.username}, Price: ${highest_bid.amount:.2f}.'
+                    }
                 except Exception as e:
                     print(f"[finalize_auction] ERROR creating/getting transaction for '{self.title}': {e}")
-                    self.auction_status = 'failed_payment' # Or a more specific error status
-                    self.auction_winner = None # Clear winner if transaction fails
-                    self.auction_winning_price = None
-                    changed_fields_artwork = ['auction_status', 'auction_winner', 'auction_winning_price'] # Reset list for save
-                    self.save(update_fields=changed_fields_artwork)
-                    return None
-            else: # Should not happen if highest_bid and owner are present
-                print(f"[finalize_auction] Critical error: Missing current_owner or auction_winner for '{self.title}' despite a winning bid.")
-                self.auction_status = 'failed_payment' # Indicate an internal error
-                changed_fields_artwork = ['auction_status']
-                self.save(update_fields=changed_fields_artwork)
-                return None
+                    outcome_data = {'outcome': 'transaction_error', 'message': f'Transaction error: {e}'}
+            else:
+                print(f"[finalize_auction] Critical error: Missing current_owner or winner for '{self.title}'.")
+                outcome_data = {'outcome': 'transaction_error', 'message': 'Missing owner or winner details.'}
         else: 
-            print(f"[finalize_auction] No valid winning bid for '{self.title}'. Highest bid object: {highest_bid}. Min bid: {self.auction_minimum_bid}")
-            self.auction_status = 'failed_no_bids'
-            self.auction_winner = None
-            self.auction_winning_price = None
-            changed_fields_artwork.extend(['auction_status', 'auction_winner', 'auction_winning_price'])
-            self.save(update_fields=changed_fields_artwork)
-            print(f"[finalize_auction] Artwork '{self.title}' saved. New status: {self.auction_status}")
-            return None
-        
+            if highest_bid:
+                 outcome_data['message'] = f'Highest bid ${highest_bid.amount} did not meet min ${self.auction_minimum_bid}.'
+            else:
+                 outcome_data['message'] = 'No bids placed.'
+
+        self.is_for_auction = False 
+        self.save() # This will reset status to 'not_configured' and clear transient fields.
+        print(f"[finalize_auction] Artwork '{self.title}' auction attempt concluded. is_for_auction: {self.is_for_auction}, new status: {self.auction_status}.")
+        return outcome_data
+
+    def cancel_auction_by_owner(self):
+        if self.is_for_auction and self.auction_status in ['configured', 'signup_open', 'awaiting_start', 'live']:
+            print(f"Auction for '{self.title}' cancelled by owner. Was: {self.auction_status}")
+            self.is_for_auction = False
+            self.save() # Triggers full reset
+            AuctionRegistration.objects.filter(artwork=self).update(status='cancelled_by_owner_auction_cancel')
+            return True
+        print(f"Cannot cancel auction for '{self.title}'. Status: {self.auction_status}, is_for_auction: {self.is_for_auction}")
+        return False       
+
 class Comment(models.Model):
     artwork = models.ForeignKey(Artwork, on_delete=models.CASCADE, related_name='comments')
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, help_text="Registered user who commented, if any.")

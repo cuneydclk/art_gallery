@@ -25,20 +25,22 @@ class ArtworkAdmin(admin.ModelAdmin):
         (None, {'fields': ('title', 'slug', 'description', 'image_placeholder_url', 'current_owner')}),
         ('Direct Sale', {'fields': ('is_for_sale_direct', 'direct_sale_price'), 'classes': ('collapse',)}),
         ('Auction Settings', {'fields': (
-            'is_for_auction', 'auction_status', 
+            'is_for_auction', 'auction_status',
             'auction_start_time', 'auction_scheduled_end_time', 'auction_minimum_bid',
-            'auction_signup_offset_minutes', 'auction_signup_deadline', # deadline is editable=False but good to see
+            'auction_signup_offset_minutes', 'auction_signup_deadline',
         ), 'classes': ('collapse',)}),
-        ('Auction Runtime/Outcome (System Managed)', {'fields': (
-            'auction_current_highest_bid', 'auction_current_highest_bidder', 
-            'last_bid_time', 'auction_winner', 'auction_winning_price'
+        ('Current Auction State (System Managed)', {'fields': ( # Renamed section slightly
+            'auction_current_highest_bid', 'auction_current_highest_bidder',
+            'last_bid_time',
+            # REMOVED: 'auction_winner', 'auction_winning_price' from here
         ), 'classes': ('collapse',)}),
     )
-    # Fields that are calculated or set by the system should be read-only in admin forms
+
     readonly_fields = (
-        'auction_signup_deadline', 
-        'auction_current_highest_bid', 'auction_current_highest_bidder', 
-        'last_bid_time', 'auction_winner', 'auction_winning_price'
+        'auction_signup_deadline',
+        'auction_current_highest_bid', 'auction_current_highest_bidder',
+        'last_bid_time',
+        # REMOVED: 'auction_winner', 'auction_winning_price' from here
     )
 
 

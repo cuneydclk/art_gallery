@@ -17,3 +17,6 @@ media/ # If you don't want to commit example media locally, but be careful if yo
 .vscode/
 .idea/
 *.DS_Store
+
+#llm feed
+llm_feed.py

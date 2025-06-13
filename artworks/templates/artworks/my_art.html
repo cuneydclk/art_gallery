@@ -1,7 +1,21 @@
 <!-- artworks/templates/artworks/my_art.html -->
 {% extends "base.html" %}
+{% load static %} <!-- In case you add static assets specific to this page later -->
 
 {% block page_title %}My Art - My Gallery{% endblock page_title %}
+
+{% block extra_head %}
+{# Re-use the same styles as the main gallery list for consistency #}
+<style>
+    .gallery-container { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; padding-top:20px;}
+    .artwork-card { border: 1px solid #ddd; padding: 15px; background-color: #fff; width: 300px; box-shadow: 2px 2px 5px rgba(0,0,0,0.1); border-radius: 5px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; }
+    .artwork-card a { text-decoration: none; color: #333; display: flex; flex-direction: column; flex-grow: 1; }
+    .artwork-card img { max-width: 100%; height: 200px; object-fit: cover; display: block; margin-bottom: 10px; border-radius: 4px; }
+    .artwork-card h2 { margin-top: 0; font-size: 1.2em; flex-grow: 1; /* Allows title to push status down */ display: flex; align-items: center; justify-content: center; }
+    .artwork-card-info { margin-top: auto; /* Pushes this block to the bottom of the card content */ }
+    .artwork-card-info p { font-size: 0.9em; margin-bottom: 5px; }
+</style>
+{% endblock extra_head %}
 
 {% block content %}
     <h1>My Art</h1>
@@ -11,24 +25,39 @@
             {% for art in owned_artworks %}
                 <div class="artwork-card">
                     <a href="{% url 'artworks:artwork_detail' art.slug %}">
-                        {% if art.image_placeholder_url %}
-                            <img src="{{ art.image_placeholder_url }}" alt="{{ art.title }} placeholder">
-                        {% else %}
-                            <img src="https://via.placeholder.com/300x200.png?text=No+Image" alt="No image available">
-                        {% endif %}
-                        <h2>{{ art.title }}</h2>
-                        {% if art.is_for_sale_direct and art.direct_sale_price %}
-                            <p><strong>Price: ${{ art.direct_sale_price }}</strong></p>
-                        {% elif art.is_for_auction %}
-                            <p><strong>Auction Active</strong></p>
-                        {% else %}
-                            <p>Not currently for sale.</p>
-                        {% endif %}
+                        <div> {# Wrapper for image and title to allow info to be at bottom #}
+                            {% if art.image_placeholder_url %}
+                                <img src="{{ art.image_placeholder_url }}" alt="{{ art.title }} placeholder">
+                            {% else %}
+                                <img src="https://via.placeholder.com/300x200.png?text=No+Image" alt="No image available">
+                            {% endif %}
+                            <h2>{{ art.title }}</h2>
+                        </div>
+                        <div class="artwork-card-info">
+                            {# No need to show "Owner: You" since it's "My Art" page #}
+                            {% if art.is_for_sale_direct and art.direct_sale_price %}
+                                <p><strong>Direct Sale Price: ${{ art.direct_sale_price }}</strong></p>
+                            {% elif art.is_for_auction %}
+                                <p><strong>
+                                    Auction Status: {{ art.get_auction_status_display }}
+                                </strong>
+                                </p>
+                                {% if art.auction_minimum_bid %}
+                                    <p>(Min. Bid: ${{ art.auction_minimum_bid }})</p>
+                                {% endif %}
+                                {% if art.auction_status == 'live' and art.auction_current_highest_bid %}
+                                     <p>Current Bid: ${{art.auction_current_highest_bid}}</p>
+                                {% endif %}
+                            {% else %}
+                                <p>Not currently for sale or auction.</p>
+                            {% endif %}
+                            <p style="margin-top:10px; font-weight:bold; color: #007bff;">Manage Settings</p>
+                        </div>
                     </a>
                 </div>
             {% endfor %}
         </div>
     {% else %}
-        <p>You currently own no artworks.</p>
+        <p>You currently own no artworks. Any artworks you acquire will be shown here.</p>
     {% endif %}
 {% endblock content %}
