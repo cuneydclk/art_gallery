@@ -226,50 +226,65 @@ class Artwork(models.Model):
             if not self.is_for_auction:
                  print(f"[finalize_auction] Auction '{self.title}' is already fully concluded (is_for_auction=False).")
                  return {'outcome': 'already_concluded'}
+            # If it's not live, but scheduled end time has passed (e.g., no one joined, or it was configured but never started properly)
             if self.auction_scheduled_end_time and timezone.now() >= self.auction_scheduled_end_time:
-                 print(f"[finalize_auction] Non-live auction '{self.title}' (status {self.auction_status}) passed scheduled end. Resetting.")
-                 self.is_for_auction = False 
-                 self.save() # Triggers full reset via main save()
-                 return {'outcome': 'no_bids', 'message': 'Auction ended before going live or without bids.'}
+                 print(f"[finalize_auction] Non-live auction '{self.title}' (status {self.auction_status}) passed scheduled end. Cleaning up.")
+                 # No winner or bids to process in this specific path
+                 outcome_data = {'outcome': 'no_bids', 'message': f'Auction ended (status: {self.auction_status}) without going live or without bids.'}
             else:
-                print(f"[finalize_auction] Auction '{self.title}' (status {self.auction_status}) is not live and has not passed scheduled end.")
-                return {'outcome': 'not_live_or_not_ended', 'message': 'Auction not live or end time not reached.'}
+                print(f"[finalize_auction] Auction '{self.title}' (status {self.auction_status}) is not live and has not passed scheduled end for non-live finalization.")
+                return {'outcome': 'not_live_or_not_ended', 'message': 'Auction not live or end time not reached for non-live finalization.'}
+        else: # Auction IS 'live'
+            highest_bid = Bid.objects.filter(artwork=self).order_by('-amount', '-timestamp').first()
+            outcome_data = {'outcome': 'no_bids', 'message': 'No bids met the criteria.'} 
 
-        highest_bid = Bid.objects.filter(artwork=self).order_by('-amount', '-timestamp').first()
-        outcome_data = {'outcome': 'no_bids', 'message': 'No bids met the criteria.'} 
+            if highest_bid and self.auction_minimum_bid is not None and highest_bid.amount >= self.auction_minimum_bid:
+                print(f"[finalize_auction] Winning bid for '{self.title}': {highest_bid.amount} by {highest_bid.bidder.username}")
+                if self.current_owner and highest_bid.bidder:
+                    from artworks.models import Transaction # Local import
+                    try:
+                        # Use update_or_create to handle potential race conditions if finalize is called multiple times
+                        transaction_obj, created = Transaction.objects.update_or_create(
+                            artwork=self, 
+                            seller=self.current_owner, # Assuming seller doesn't change during auction
+                            sale_type='auction_win',
+                            defaults={ # These fields will be set if new, or updated if existing (though buyer/price shouldn't change for a concluded auction)
+                                'buyer': highest_bid.bidder, 
+                                'final_price': highest_bid.amount, 
+                                'status': 'pending_payment'
+                            }
+                        )
+                        if created: print(f"[finalize_auction] Transaction CREATED for '{self.title}'. ID: {transaction_obj.id}")
+                        else: print(f"[finalize_auction] Transaction UPDATED/FOUND for '{self.title}'. ID: {transaction_obj.id}.")
+                        
+                        outcome_data = {
+                            'outcome': 'winner_found', 'transaction': transaction_obj, 
+                            'winner': highest_bid.bidder, 'price': highest_bid.amount,
+                            'message': f'Winner: {highest_bid.bidder.username}, Price: ${highest_bid.amount:.2f}.'
+                        }
+                    except Exception as e:
+                        print(f"[finalize_auction] ERROR creating/getting transaction for '{self.title}': {e}")
+                        outcome_data = {'outcome': 'transaction_error', 'message': f'Transaction error: {e}'}
+                else:
+                    print(f"[finalize_auction] Critical error: Missing current_owner or winner for '{self.title}'.")
+                    outcome_data = {'outcome': 'transaction_error', 'message': 'Missing owner or winner details.'}
+            else: 
+                if highest_bid:
+                     outcome_data['message'] = f'Highest bid ${highest_bid.amount} did not meet min ${self.auction_minimum_bid}.'
+                else:
+                     outcome_data['message'] = 'No bids placed.'
 
-        if highest_bid and self.auction_minimum_bid is not None and highest_bid.amount >= self.auction_minimum_bid:
-            print(f"[finalize_auction] Winning bid for '{self.title}': {highest_bid.amount} by {highest_bid.bidder.username}")
-            if self.current_owner and highest_bid.bidder:
-                from artworks.models import Transaction # Local import
-                try:
-                    transaction_obj, created = Transaction.objects.get_or_create(
-                        artwork=self, buyer=highest_bid.bidder, seller=self.current_owner, 
-                        sale_type='auction_win',
-                        defaults={'final_price': highest_bid.amount, 'status': 'pending_payment'}
-                    )
-                    if created: print(f"[finalize_auction] Transaction CREATED for '{self.title}'. ID: {transaction_obj.id}")
-                    else: print(f"[finalize_auction] Transaction already EXISTED for '{self.title}'. ID: {transaction_obj.id}.")
-                    
-                    outcome_data = {
-                        'outcome': 'winner_found', 'transaction': transaction_obj, 
-                        'winner': highest_bid.bidder, 'price': highest_bid.amount,
-                        'message': f'Winner: {highest_bid.bidder.username}, Price: ${highest_bid.amount:.2f}.'
-                    }
-                except Exception as e:
-                    print(f"[finalize_auction] ERROR creating/getting transaction for '{self.title}': {e}")
-                    outcome_data = {'outcome': 'transaction_error', 'message': f'Transaction error: {e}'}
-            else:
-                print(f"[finalize_auction] Critical error: Missing current_owner or winner for '{self.title}'.")
-                outcome_data = {'outcome': 'transaction_error', 'message': 'Missing owner or winner details.'}
-        else: 
-            if highest_bid:
-                 outcome_data['message'] = f'Highest bid ${highest_bid.amount} did not meet min ${self.auction_minimum_bid}.'
-            else:
-                 outcome_data['message'] = 'No bids placed.'
+        # --- THIS IS THE NEW PART ---
+        # Clear registrations regardless of outcome, as the auction "attempt" is over.
+        # This will delete registrations associated with this artwork.
+        # If you prefer to mark them inactive instead of deleting:
+        # self.auction_registrations.update(status='concluded', owner_reviewed_at=timezone.now())
+        registrations_deleted_count, _ = self.auction_registrations.all().delete()
+        print(f"[finalize_auction] Cleared {registrations_deleted_count} auction registrations for '{self.title}'.")
+        # --- END OF NEW PART ---
 
         self.is_for_auction = False 
-        self.save() # This will reset status to 'not_configured' and clear transient fields.
+        self.save() # This will reset status to 'not_configured' and clear transient auction fields on Artwork model.
         print(f"[finalize_auction] Artwork '{self.title}' auction attempt concluded. is_for_auction: {self.is_for_auction}, new status: {self.auction_status}.")
         return outcome_data
 
