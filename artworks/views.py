@@ -13,7 +13,7 @@ from datetime import timedelta
 from django.db.models import Q
 from django.db import transaction as db_transaction
 from decimal import Decimal
-
+from django.http import HttpResponse
 
 def artwork_list_view(request):
     artworks = Artwork.objects.all().order_by('-created_at')
@@ -184,17 +184,32 @@ def payment_and_dekont_upload_view(request, transaction_id):
         messages.error(request, "This transaction is not awaiting payment or dekont upload.")
         return redirect('artworks:artwork_detail', slug=transaction.artwork.slug) 
     gallery_settings = GallerySetting.load()
+    
     if request.method == 'POST':
-        form = DekontUploadForm(request.POST, request.FILES, instance=transaction)
+        # Use our new form
+        form = DekontUploadForm(request.POST, request.FILES) 
         if form.is_valid():
-            transaction = form.save(commit=False)
+            # Get the uploaded file object from the form
+            uploaded_file = form.cleaned_data['dekont_upload']
+            
+            # Update the transaction object manually
+            transaction.dekont_data = uploaded_file.read() # Read binary data
+            transaction.dekont_filename = uploaded_file.name # Get original filename
+            transaction.dekont_content_type = uploaded_file.content_type # Get MIME type
+            
             transaction.status = 'pending_approval'
             transaction.dekont_uploaded_at = timezone.now()
-            transaction.save()
+            transaction.save(update_fields=[
+                'dekont_data', 'dekont_filename', 'dekont_content_type', 
+                'status', 'dekont_uploaded_at'
+            ])
+            
             messages.success(request, "Dekont uploaded successfully. We will review it shortly.")
             return redirect('artworks:transaction_status', transaction_id=transaction.id)
     else:
-        form = DekontUploadForm(instance=transaction)
+        # The form is no longer an instance form
+        form = DekontUploadForm() 
+        
     context = {
         'transaction': transaction, 'artwork': transaction.artwork, 'form': form,
         'gallery_settings': gallery_settings, 'page_title': f"Payment for {transaction.artwork.title}"
@@ -1010,4 +1025,23 @@ def place_bid_view(request, artwork_slug): # MODIFIED
     else:
         return redirect('artworks:artwork_detail', slug=artwork.slug)
     
+@login_required
+def view_dekont_view(request, transaction_id):
+    transaction = get_object_or_404(Transaction, id=transaction_id)
+
+    # Security Check: Only allow the buyer or seller or a superuser to view the dekont
+    if not (request.user.is_superuser or request.user == transaction.buyer or request.user == transaction.seller):
+        messages.error(request, "You do not have permission to view this file.")
+        return redirect('artworks:artwork_list')
+
+    if not transaction.dekont_data:
+        messages.error(request, "No dekont file found for this transaction.")
+        return redirect('artworks:transaction_status', transaction_id=transaction.id)
     
+    # Create an HTTP response with the binary data and the correct content type
+    response = HttpResponse(transaction.dekont_data, content_type=transaction.dekont_content_type)
+    
+    # This header tells the browser to try and display the file, not just download it
+    response['Content-Disposition'] = f'inline; filename="{transaction.dekont_filename}"'
+    
+    return response

@@ -8,7 +8,7 @@ from .models import (Artwork, Comment, Transaction, GallerySetting, UserProfile,
 from django.utils.html import format_html
 from django.utils import timezone
 from django.contrib import messages
-
+from django.urls import reverse
 
 class ArtworkAdmin(admin.ModelAdmin):
     list_display = (
@@ -63,9 +63,9 @@ class TransactionAdmin(admin.ModelAdmin):
     list_display = ('artwork_title', 'buyer_username', 'seller_username', 'final_price', 'sale_type', 'status', 'initiated_at', 'dekont_preview') # Added sale_type
     list_filter = ('status', 'sale_type', 'initiated_at')
     search_fields = ('artwork__title', 'buyer__username', 'seller__username')
-    readonly_fields = ('initiated_at', 'dekont_uploaded_at', 'admin_action_at', 'dekont_image_display', 'seller')
+    readonly_fields = ('initiated_at', 'dekont_uploaded_at', 'admin_action_at', 'dekont_preview', 'seller')
     
-    fields = (('artwork', 'buyer'), ('seller'), ('sale_type', 'final_price'), 'status', 'admin_remarks', 'dekont_image', 'dekont_image_display', 'initiated_at', 'dekont_uploaded_at', 'admin_action_at')
+    fields = (('artwork', 'buyer'), ('seller'), ('sale_type', 'final_price'), 'status', 'admin_remarks', 'dekont_preview', 'initiated_at', 'dekont_uploaded_at', 'admin_action_at')
 
     def artwork_title(self, obj):
         return obj.artwork.title
@@ -80,9 +80,16 @@ class TransactionAdmin(admin.ModelAdmin):
     seller_username.short_description = 'Seller'
     
     def dekont_preview(self, obj):
-        if obj.dekont_image:
-            return format_html('<a href="{}">View Dekont</a>', obj.dekont_image.url)
-        return "No Dekont"
+        if obj.dekont_data:
+            # Create a link to our new view
+            url = reverse('artworks:view_dekont', args=[obj.id])
+            # Check if it's an image to show a preview
+            if 'image' in obj.dekont_content_type:
+                 return format_html('<a href="{0}" target="_blank"><img src="{0}" width="150" /></a><br/><a href="{0}" target="_blank">View Full</a>', url)
+            else:
+                 # Otherwise, just provide a link to the file (e.g., for a PDF)
+                 return format_html('<a href="{}" target="_blank">View Dekont ({})</a>', url, obj.dekont_filename)
+        return "No Dekont Uploaded"
     dekont_preview.short_description = 'Dekont'
 
     def dekont_image_display(self, obj):

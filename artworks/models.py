@@ -336,8 +336,13 @@ class Transaction(models.Model):
     sale_type = models.CharField(max_length=20, choices=SALE_TYPE_CHOICES)
     final_price = models.DecimalField(max_digits=10, decimal_places=2)
     
-    dekont_image = models.FileField(upload_to='dekonts/', null=True, blank=True) 
+    #dekont_image = models.FileField(upload_to='dekonts/', null=True, blank=True) 
     
+    # +++ NEW FIELDS to store the file in the database +++
+    dekont_data = models.BinaryField(null=True, blank=True, editable=False)
+    dekont_filename = models.CharField(max_length=255, null=True, blank=True)
+    dekont_content_type = models.CharField(max_length=100, null=True, blank=True)
+
     status = models.CharField(max_length=20, choices=TRANSACTION_STATUS_CHOICES, default='pending_payment')
     
     initiated_at = models.DateTimeField(auto_now_add=True) 

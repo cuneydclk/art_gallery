@@ -16,5 +16,6 @@ urlpatterns = [
     path('buy/initiate/<slug:artwork_slug>/', views.initiate_buy_view, name='initiate_buy'),
     path('transaction/<int:transaction_id>/payment/', views.payment_and_dekont_upload_view, name='payment_and_dekont_upload'),
     path('transaction/<int:transaction_id>/status/', views.transaction_status_view, name='transaction_status'),
+    path('transaction/<int:transaction_id>/view-dekont/', views.view_dekont_view, name='view_dekont'),
     path('profile/edit/', views.edit_profile_view, name='edit_profile'),
 ]
