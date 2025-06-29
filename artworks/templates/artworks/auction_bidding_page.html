@@ -130,6 +130,25 @@
     </div>
 </div>
 
+<!-- ====================================================================== -->
+<!-- NEW AUTO-REFRESH SCRIPT -->
+<!-- This script is separate and will simply reload the page every 15 seconds -->
+<!-- to fetch new bids from other users. -->
+<!-- ====================================================================== -->
+{% if artwork.is_auction_live_now %}
+<script>
+    // Set the refresh interval in milliseconds (15 seconds = 15000 ms)
+    const refreshInterval = 15000;
+
+    // Use setTimeout to schedule a single reload after 15 seconds.
+    // When the page reloads, this script will run again, scheduling the next reload.
+    setTimeout(function() {
+        window.location.reload();
+    }, refreshInterval);
+</script>
+{% endif %}
+
+
 {% if time_remaining_seconds > 0 and not auction_end_message %} {# Keep condition for initial script inclusion #}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
