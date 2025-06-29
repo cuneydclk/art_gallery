@@ -46,6 +46,17 @@
 
     .back-link { display:inline-block; margin-bottom:15px; color: #007bff; text-decoration:none; }
     .back-link:hover { text-decoration:underline; }
+
+    .artwork-image-container {
+        text-align: center; /* This will center the image within the div */
+        margin-bottom: 20px; /* Add some space below the image */
+    }
+    .artwork-detail-image {
+        max-width: 100%; /* The image will not overflow its container */
+        height: auto;    /* Maintain aspect ratio */
+        border-radius: 5px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1); /* Optional: add a subtle shadow */
+    }
 </style>
 {% endblock extra_head %}
 
@@ -54,15 +65,15 @@
     <div class="artwork-detail-container">
         <h1>{{ artwork.title }}</h1>
 
-        {% if artwork.image_placeholder_url %}
-            <img src="{{ artwork.image_placeholder_url }}" alt="{{ artwork.title }} placeholder" style="max-width:100%; height:auto; border-radius:4px; margin-bottom:15px;">
-        {% else %}
-            <img src="https://via.placeholder.com/600x400.png?text=No+Image+Available" alt="No image available" style="max-width:100%; height:auto; border-radius:4px; margin-bottom:15px;">
-        {% endif %}
+        <div class="artwork-image-container"> {# Add a wrapper div for easy centering #}
+            {% if artwork.image_placeholder_url %}
+                <img class="artwork-detail-image" src="{{ artwork.image_placeholder_url }}" alt="{{ artwork.title }} placeholder">
+            {% else %}
+                <img class="artwork-detail-image" src="https://via.placeholder.com/600x400.png?text=No+Image+Available" alt="No image available">
+            {% endif %}
+        </div>
 
         <div class="meta-info">
-            <p><strong>Description:</strong></p>
-            <p>{{ artwork.description|linebreaks }}</p>
             <p><strong>Owner:</strong>
                 {% if artwork.current_owner %}
                     {{ artwork.current_owner.username }}

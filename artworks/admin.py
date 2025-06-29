@@ -18,11 +18,11 @@ class ArtworkAdmin(admin.ModelAdmin):
         'created_at'
     )
     list_filter = ('is_for_sale_direct', 'is_for_auction', 'auction_status', 'current_owner')
-    search_fields = ('title', 'description', 'slug')
+    search_fields = ('title', 'slug')
     prepopulated_fields = {'slug': ('title',)}
     
     fieldsets = (
-        (None, {'fields': ('title', 'slug', 'description', 'image_placeholder_url', 'current_owner')}),
+        (None, {'fields': ('title', 'slug', 'image_placeholder_url', 'current_owner')}),
         ('Direct Sale', {'fields': ('is_for_sale_direct', 'direct_sale_price'), 'classes': ('collapse',)}),
         ('Auction Settings', {'fields': (
             'is_for_auction', 'auction_status',

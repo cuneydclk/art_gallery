@@ -11,7 +11,6 @@ from decimal import Decimal
 class Artwork(models.Model):
     title = models.CharField(max_length=200)
     slug = models.SlugField(max_length=255, unique=True, blank=True, help_text="Unique URL-friendly identifier. Leave blank to auto-generate from title.")
-    description = models.TextField()
     image_placeholder_url = models.URLField(max_length=500, blank=True, null=True, help_text="URL to a placeholder image for now.")
     current_owner = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="owned_artworks")
     is_for_sale_direct = models.BooleanField(default=False)

@@ -5,7 +5,7 @@ from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from .models import Artwork, Comment, Transaction, GallerySetting, UserProfile, AuctionRegistration, Bid # AuctionRegistration Added
 from .forms import (CommentForm, GuestCommentForm, ArtworkDirectSaleForm, 
-                    DekontUploadForm, UserProfileForm,
+                    DekontUploadForm, UserProfileForm, UserUpdateForm,
                     ArtworkAuctionSettingsForm, PlaceBidForm)
 from django.contrib import messages
 from django.utils import timezone
@@ -14,6 +14,9 @@ from django.db.models import Q
 from django.db import transaction as db_transaction
 from decimal import Decimal
 from django.http import HttpResponse
+from django.contrib.auth import update_session_auth_hash
+from django.contrib.auth.forms import PasswordChangeForm 
+from django.http import JsonResponse
 
 def artwork_list_view(request):
     artworks = Artwork.objects.all().order_by('-created_at')
@@ -228,19 +231,53 @@ def transaction_status_view(request, transaction_id):
 @login_required
 def edit_profile_view(request):
     try:
-        profile = request.user.profile
+        user_profile = request.user.profile
     except UserProfile.DoesNotExist:
-        profile = UserProfile.objects.create(user=request.user)
+        user_profile = UserProfile.objects.create(user=request.user)
+
     if request.method == 'POST':
-        form = UserProfileForm(request.POST, instance=profile)
-        if form.is_valid():
-            form.save()
-            messages.success(request, 'Your profile has been updated successfully.')
-            return redirect('artworks:edit_profile')
-    else:
-        form = UserProfileForm(instance=profile)
+        # Check which form was submitted using the button's 'name' attribute
+        if 'update_bank_details' in request.POST:
+            profile_form = UserProfileForm(request.POST, instance=user_profile)
+            if profile_form.is_valid():
+                profile_form.save()
+                messages.success(request, 'Your bank details have been updated successfully.')
+                return redirect('artworks:edit_profile')
+        else:
+            profile_form = UserProfileForm(instance=user_profile)
+
+        if 'update_account_details' in request.POST:
+            user_form = UserUpdateForm(request.POST, instance=request.user)
+            if user_form.is_valid():
+                user_form.save()
+                messages.success(request, 'Your account details (username/email) have been updated.')
+                return redirect('artworks:edit_profile')
+        else:
+            user_form = UserUpdateForm(instance=request.user)
+
+        if 'change_password' in request.POST:
+            password_form = PasswordChangeForm(request.user, request.POST)
+            if password_form.is_valid():
+                user = password_form.save()
+                # IMPORTANT: This keeps the user logged in after a password change
+                update_session_auth_hash(request, user)
+                messages.success(request, 'Your password was successfully updated!')
+                return redirect('artworks:edit_profile')
+            else:
+                messages.error(request, 'Please correct the error below.')
+        else:
+            password_form = PasswordChangeForm(request.user)
+
+    else: # This is for a GET request
+        profile_form = UserProfileForm(instance=user_profile)
+        user_form = UserUpdateForm(instance=request.user)
+        password_form = PasswordChangeForm(request.user)
+
     context = {
-        'form': form, 'page_title': 'Edit Your Profile & Bank Details'
+        'profile_form': profile_form,
+        'user_form': user_form,
+        'password_form': password_form,
+        'page_title': 'Edit Your Profile'
     }
     return render(request, 'artworks/edit_profile.html', context)
 

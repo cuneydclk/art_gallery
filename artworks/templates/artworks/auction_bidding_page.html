@@ -8,8 +8,22 @@
 {% block extra_head %}
 <style>
     .bidding-page-container { max-width: 900px; margin: auto; }
-    .artwork-info-bidding { display: flex; gap: 20px; margin-bottom: 20px; }
-    .artwork-info-bidding img { max-width: 200px; height: auto; border-radius: 4px; }
+    .artwork-info-bidding {
+        display: flex;
+        gap: 20px;
+        margin-bottom: 20px;
+        align-items: center; /* This helps vertically align the image and text */
+    }
+    .artwork-info-bidding .image-wrapper { /* Add a new rule for a wrapper */
+        flex-basis: 200px; /* Give the image area a fixed base size */
+        flex-shrink: 0;
+        text-align: center;
+    }
+    .artwork-info-bidding img {
+        max-width: 100%; /* Image will be contained within the 200px wrapper */
+        height: auto;
+        border-radius: 4px;
+    }
     .artwork-info-bidding h2 { margin-top: 0; }
     .auction-stats { background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
     .auction-stats p { margin: 8px 0; font-size: 1.1em; }
@@ -39,15 +53,16 @@
     <a href="{% url 'artworks:artwork_detail' artwork.slug %}" class="back-link" style="display:inline-block; margin-bottom:15px;">« Back to Artwork Details</a>
 
     <div class="artwork-info-bidding">
-        {% if artwork.image_placeholder_url %}
-            <img src="{{ artwork.image_placeholder_url }}" alt="{{ artwork.title }}">
-        {% else %}
-            <img src="https://via.placeholder.com/200.png?text=No+Image" alt="No image available">
-        {% endif %}
+        <div class="image-wrapper"> {# The new wrapper div #}
+            {% if artwork.image_placeholder_url %}
+                <img src="{{ artwork.image_placeholder_url }}" alt="{{ artwork.title }}">
+            {% else %}
+                <img src="https://via.placeholder.com/200.png?text=No+Image" alt="No image available">
+            {% endif %}
+        </div>
         <div>
             <h2>{{ artwork.title }}</h2>
             <p>by {{ artwork.current_owner.username }}</p>
-            <p><em>{{ artwork.description|truncatewords:30 }}</em></p>
         </div>
     </div>
 

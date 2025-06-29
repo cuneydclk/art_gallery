@@ -3,6 +3,7 @@ from django import forms
 from django.contrib.auth.models import User # Add User
 from .models import Comment, Artwork, Transaction, UserProfile
 from django.utils import timezone # Import timezone for validation
+from django.contrib.auth.forms import UserChangeForm, PasswordChangeForm
 
 class CommentForm(forms.ModelForm):
     # We'll add the guest_name field conditionally in the view
@@ -164,3 +165,17 @@ class PlaceBidForm(forms.Form):
         decimal_places=2,
         widget=forms.NumberInput(attrs={'step': '0.01', 'placeholder': 'e.g., 125.50'})
     )
+
+class UserUpdateForm(UserChangeForm):
+    # We remove the password field from this form, as it's handled separately.
+    password = None 
+
+    class Meta:
+        model = User
+        fields = ('username', 'email')
+        help_texts = {
+            'username': None, # Removes the default "Required. 150 characters or fewer..." help text to keep the form clean.
+        }
+        labels = {
+            'email': 'Email Address'
+        }
