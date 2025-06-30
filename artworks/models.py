@@ -259,7 +259,7 @@ class Artwork(models.Model):
                         outcome_data = {
                             'outcome': 'winner_found', 'transaction': transaction_obj, 
                             'winner': highest_bid.bidder, 'price': highest_bid.amount,
-                            'message': f'Winner: {highest_bid.bidder.username}, Price: ${highest_bid.amount:.2f}.'
+                            'message': f'Winner: {highest_bid.bidder.username}, Price: {highest_bid.amount:.2f} ₺.'
                         }
                     except Exception as e:
                         print(f"[finalize_auction] ERROR creating/getting transaction for '{self.title}': {e}")
@@ -269,7 +269,7 @@ class Artwork(models.Model):
                     outcome_data = {'outcome': 'transaction_error', 'message': 'Missing owner or winner details.'}
             else: 
                 if highest_bid:
-                     outcome_data['message'] = f'Highest bid ${highest_bid.amount} did not meet min ${self.auction_minimum_bid}.'
+                     outcome_data['message'] = f'Highest bid {highest_bid.amount} ₺ did not meet min {self.auction_minimum_bid} ₺.'
                 else:
                      outcome_data['message'] = 'No bids placed.'
 

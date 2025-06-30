@@ -36,7 +36,7 @@ class ArtworkDirectSaleForm(forms.ModelForm):
         }
         labels = {
             'is_for_sale_direct': 'Offer for Direct Sale?',
-            'direct_sale_price': 'Direct Sale Price ($)',
+            'direct_sale_price': 'Direct Sale Price (₺)',
         }
 
     def clean(self):
@@ -104,7 +104,7 @@ class ArtworkAuctionSettingsForm(forms.ModelForm):
             'is_for_auction': 'Offer this Artwork for Auction?',
             'auction_start_time': 'Auction Start Date & Time',
             'auction_scheduled_end_time': 'Scheduled Auction End Date & Time',
-            'auction_minimum_bid': 'Minimum Starting Bid ($)',
+            'auction_minimum_bid': 'Minimum Starting Bid (₺)',
             'auction_signup_offset_minutes': 'Sign-up Window Closes (minutes before start)',
         }
         help_texts = {
@@ -160,7 +160,7 @@ class ArtworkAuctionSettingsForm(forms.ModelForm):
     
 class PlaceBidForm(forms.Form):
     bid_amount = forms.DecimalField(
-        label="Your Bid Amount ($)",
+        label="Your Bid Amount (₺)",
         min_value=0.01, # A very small minimum, actual minimum will be enforced by current bid + increment
         decimal_places=2,
         widget=forms.NumberInput(attrs={'step': '0.01', 'placeholder': 'e.g., 125.50'})

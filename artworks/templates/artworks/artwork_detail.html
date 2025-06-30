@@ -147,11 +147,11 @@
                 <p><strong>Scheduled End:</strong> {{ artwork.auction_scheduled_end_time|date:"F j, Y, P T"|default:"Not set" }}</p>
                 {% endif %}
                 {% if artwork.auction_minimum_bid %}
-                <p><strong>Minimum Bid:</strong> ${{ artwork.auction_minimum_bid|floatformat:2|default:"N/A" }}</p>
+                <p><strong>Minimum Bid:</strong> {{ artwork.auction_minimum_bid|floatformat:2|default:"N/A" }} ₺</p>
                 {% endif %}
                 
                 {% if artwork.auction_status == 'live' %}
-                    <p><strong>Current Highest Bid:</strong> ${{ artwork.auction_current_highest_bid|default_if_none:"No bids yet"|floatformat:2 }}</p>
+                    <p><strong>Current Highest Bid:</strong> {{ artwork.auction_current_highest_bid|default_if_none:"No bids yet"|floatformat:2 }} ₺</p>
                     {% if artwork.auction_current_highest_bidder %}
                         <p><strong>Highest Bidder:</strong> {{ artwork.auction_current_highest_bidder.username }}</p>
                     {% endif %}
@@ -199,7 +199,7 @@
 
             {% elif artwork.is_for_sale_direct and artwork.direct_sale_price %}
                 <p><strong>Available for Direct Sale</strong></p>
-                <p><strong>Price: ${{ artwork.direct_sale_price|floatformat:2 }}</strong></p>
+                <p><strong>Price: {{ artwork.direct_sale_price|floatformat:2 }} ₺</strong></p>
                 {% if user.is_authenticated %}
                     {% if user != artwork.current_owner %}
                         <form method="post" action="{% url 'artworks:initiate_buy' artwork.slug %}">

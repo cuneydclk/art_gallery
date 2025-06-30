@@ -692,13 +692,13 @@ def place_bid_view(request, artwork_slug):
             # And also strictly greater than any existing bid (or equal to minimum if it's the first bid)
             required_min_bid = artwork.auction_minimum_bid
             if highest_bid_obj:
-                 # A common rule: bid must be at least current_highest + a minimum increment (e.g. $1)
+                 # A common rule: bid must be at least current_highest + a minimum increment (e.g. ₺1)
                  # For simplicity now, just greater than current_highest_bid_val
                 if bid_amount <= current_highest_bid_val:
-                    messages.error(request, f"Your bid must be higher than the current highest bid of ${current_highest_bid_val:.2f}.")
+                    messages.error(request, f"Your bid must be higher than the current highest bid of {current_highest_bid_val:.2f} ₺.")
                     return redirect('artworks:auction_bidding_page', artwork_slug=artwork.slug)
             elif bid_amount < artwork.auction_minimum_bid: # First bid must meet minimum
-                 messages.error(request, f"Your first bid must be at least the minimum bid of ${artwork.auction_minimum_bid:.2f}.")
+                 messages.error(request, f"Your first bid must be at least the minimum bid of {artwork.auction_minimum_bid:.2f} ₺.")
                  return redirect('artworks:auction_bidding_page', artwork_slug=artwork.slug)
 
 
@@ -732,7 +732,7 @@ def place_bid_view(request, artwork_slug):
                 'last_bid_time',
                 'auction_scheduled_end_time' # If soft close extended it
             ])
-            messages.success(request, f"Your bid of ${bid_amount:.2f} has been placed successfully!")
+            messages.success(request, f"Your bid of {bid_amount:.2f} ₺ has been placed successfully!")
             print(f"Bid of {bid_amount} by {request.user.username} PLACED on {artwork.title}") # DEBUG
 
             # --- Check if auction should end NOW (after this bid) ---
@@ -1007,7 +1007,7 @@ def place_bid_view(request, artwork_slug): # MODIFIED
                 return redirect('artworks:auction_bidding_page', artwork_slug=artwork_locked.slug)
 
             if bid_amount <= current_highest_bid_val:
-                messages.error(request, f"Your bid of ${bid_amount:.2f} must be higher than the current bid of ${current_highest_bid_val:.2f}.")
+                messages.error(request, f"Your bid of {bid_amount:.2f} ₺ must be higher than the current bid of {current_highest_bid_val:.2f} ₺.")
                 return redirect('artworks:auction_bidding_page', artwork_slug=artwork_locked.slug)
             # No need for artwork_locked.auction_minimum_bid check here if current_highest_bid_val already considers it.
 
@@ -1035,7 +1035,7 @@ def place_bid_view(request, artwork_slug): # MODIFIED
                  print(f"Soft close triggered by bid. New scheduled end for {artwork_locked.title}: {artwork_locked.auction_scheduled_end_time}")
             
             artwork_locked.save(update_fields=updated_fields_for_artwork)
-            messages.success(request, f"Your bid of ${bid_amount:.2f} has been placed successfully!")
+            messages.success(request, f"Your bid of {bid_amount:.2f} ₺ has been placed successfully!")
             print(f"Bid of {bid_amount} by {request.user.username} PLACED on {artwork_locked.title}")
 
             # --- Check if auction should end NOW (after this bid made it the LATEST action) ---
