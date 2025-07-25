@@ -21,7 +21,7 @@ class Migration(migrations.Migration):
                 ('title', models.CharField(max_length=200)),
                 ('slug', models.SlugField(blank=True, help_text='Unique URL-friendly identifier. Leave blank to auto-generate from title.', max_length=255, unique=True)),
                 ('description', models.TextField()),
-                ('image_placeholder_url', models.URLField(blank=True, help_text='URL to a placeholder image for now.', max_length=500, null=True)),
+                ('image_placeholder_url', models.URLField(blank=True, help_text='URL to a placeholder image for now.', max_length=900, null=True)),
                 ('is_for_sale_direct', models.BooleanField(default=False)),
                 ('direct_sale_price', models.DecimalField(blank=True, decimal_places=2, max_digits=10, null=True)),
                 ('is_for_auction', models.BooleanField(default=False)),
