@@ -3,6 +3,7 @@ from django import forms
 from django.contrib.auth.models import User # Add User
 from .models import Comment, Artwork, Transaction, UserProfile
 from django.utils import timezone # Import timezone for validation
+from django.contrib.auth.forms import UserChangeForm, PasswordChangeForm
 
 class CommentForm(forms.ModelForm):
     # We'll add the guest_name field conditionally in the view
@@ -35,7 +36,7 @@ class ArtworkDirectSaleForm(forms.ModelForm):
         }
         labels = {
             'is_for_sale_direct': 'Offer for Direct Sale?',
-            'direct_sale_price': 'Direct Sale Price ($)',
+            'direct_sale_price': 'Direct Sale Price (₺)',
         }
 
     def clean(self):
@@ -56,24 +57,19 @@ class ArtworkDirectSaleForm(forms.ModelForm):
         
         return cleaned_data
     
-class DekontUploadForm(forms.ModelForm):
-    class Meta:
-        model = Transaction
-        fields = ['dekont_image']
-        labels = {
-            'dekont_image': 'Upload Dekont (PDF, JPG, PNG)'
-        }
-        help_texts = {
-            'dekont_image': 'Please upload a clear image or PDF of your payment confirmation.'
-        }
+class DekontUploadForm(forms.Form): # Change from ModelForm to Form
+    dekont_upload = forms.FileField( # Give the field a new name
+        label='Upload Dekont (PDF, JPG, PNG)',
+        help_text='Please upload a clear image or PDF of your payment confirmation.',
+        required=True
+    )
     
-    def clean_dekont_image(self):
-        dekont = self.cleaned_data.get('dekont_image', False)
+    def clean_dekont_upload(self):
+        dekont = self.cleaned_data.get('dekont_upload', False)
         if dekont:
             if dekont.size > 5*1024*1024: # Max 5MB
                 raise forms.ValidationError("File too large ( > 5MB )")
             # You can add more validation for file types here if needed
-            # For example, check dekont.content_type
             return dekont
         else:
             raise forms.ValidationError("Couldn't read uploaded file.")
@@ -108,7 +104,7 @@ class ArtworkAuctionSettingsForm(forms.ModelForm):
             'is_for_auction': 'Offer this Artwork for Auction?',
             'auction_start_time': 'Auction Start Date & Time',
             'auction_scheduled_end_time': 'Scheduled Auction End Date & Time',
-            'auction_minimum_bid': 'Minimum Starting Bid ($)',
+            'auction_minimum_bid': 'Minimum Starting Bid (₺)',
             'auction_signup_offset_minutes': 'Sign-up Window Closes (minutes before start)',
         }
         help_texts = {
@@ -164,8 +160,22 @@ class ArtworkAuctionSettingsForm(forms.ModelForm):
     
 class PlaceBidForm(forms.Form):
     bid_amount = forms.DecimalField(
-        label="Your Bid Amount ($)",
+        label="Your Bid Amount (₺)",
         min_value=0.01, # A very small minimum, actual minimum will be enforced by current bid + increment
         decimal_places=2,
         widget=forms.NumberInput(attrs={'step': '0.01', 'placeholder': 'e.g., 125.50'})
     )
+
+class UserUpdateForm(UserChangeForm):
+    # We remove the password field from this form, as it's handled separately.
+    password = None 
+
+    class Meta:
+        model = User
+        fields = ('username', 'email')
+        help_texts = {
+            'username': None, # Removes the default "Required. 150 characters or fewer..." help text to keep the form clean.
+        }
+        labels = {
+            'email': 'Email Address'
+        }

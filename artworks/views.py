@@ -5,7 +5,7 @@ from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from .models import Artwork, Comment, Transaction, GallerySetting, UserProfile, AuctionRegistration, Bid # AuctionRegistration Added
 from .forms import (CommentForm, GuestCommentForm, ArtworkDirectSaleForm, 
-                    DekontUploadForm, UserProfileForm,
+                    DekontUploadForm, UserProfileForm, UserUpdateForm,
                     ArtworkAuctionSettingsForm, PlaceBidForm)
 from django.contrib import messages
 from django.utils import timezone
@@ -13,7 +13,10 @@ from datetime import timedelta
 from django.db.models import Q
 from django.db import transaction as db_transaction
 from decimal import Decimal
-
+from django.http import HttpResponse
+from django.contrib.auth import update_session_auth_hash
+from django.contrib.auth.forms import PasswordChangeForm 
+from django.http import JsonResponse
 
 def artwork_list_view(request):
     artworks = Artwork.objects.all().order_by('-created_at')
@@ -184,17 +187,32 @@ def payment_and_dekont_upload_view(request, transaction_id):
         messages.error(request, "This transaction is not awaiting payment or dekont upload.")
         return redirect('artworks:artwork_detail', slug=transaction.artwork.slug) 
     gallery_settings = GallerySetting.load()
+    
     if request.method == 'POST':
-        form = DekontUploadForm(request.POST, request.FILES, instance=transaction)
+        # Use our new form
+        form = DekontUploadForm(request.POST, request.FILES) 
         if form.is_valid():
-            transaction = form.save(commit=False)
+            # Get the uploaded file object from the form
+            uploaded_file = form.cleaned_data['dekont_upload']
+            
+            # Update the transaction object manually
+            transaction.dekont_data = uploaded_file.read() # Read binary data
+            transaction.dekont_filename = uploaded_file.name # Get original filename
+            transaction.dekont_content_type = uploaded_file.content_type # Get MIME type
+            
             transaction.status = 'pending_approval'
             transaction.dekont_uploaded_at = timezone.now()
-            transaction.save()
+            transaction.save(update_fields=[
+                'dekont_data', 'dekont_filename', 'dekont_content_type', 
+                'status', 'dekont_uploaded_at'
+            ])
+            
             messages.success(request, "Dekont uploaded successfully. We will review it shortly.")
             return redirect('artworks:transaction_status', transaction_id=transaction.id)
     else:
-        form = DekontUploadForm(instance=transaction)
+        # The form is no longer an instance form
+        form = DekontUploadForm() 
+        
     context = {
         'transaction': transaction, 'artwork': transaction.artwork, 'form': form,
         'gallery_settings': gallery_settings, 'page_title': f"Payment for {transaction.artwork.title}"
@@ -213,19 +231,53 @@ def transaction_status_view(request, transaction_id):
 @login_required
 def edit_profile_view(request):
     try:
-        profile = request.user.profile
+        user_profile = request.user.profile
     except UserProfile.DoesNotExist:
-        profile = UserProfile.objects.create(user=request.user)
+        user_profile = UserProfile.objects.create(user=request.user)
+
     if request.method == 'POST':
-        form = UserProfileForm(request.POST, instance=profile)
-        if form.is_valid():
-            form.save()
-            messages.success(request, 'Your profile has been updated successfully.')
-            return redirect('artworks:edit_profile')
-    else:
-        form = UserProfileForm(instance=profile)
+        # Check which form was submitted using the button's 'name' attribute
+        if 'update_bank_details' in request.POST:
+            profile_form = UserProfileForm(request.POST, instance=user_profile)
+            if profile_form.is_valid():
+                profile_form.save()
+                messages.success(request, 'Your bank details have been updated successfully.')
+                return redirect('artworks:edit_profile')
+        else:
+            profile_form = UserProfileForm(instance=user_profile)
+
+        if 'update_account_details' in request.POST:
+            user_form = UserUpdateForm(request.POST, instance=request.user)
+            if user_form.is_valid():
+                user_form.save()
+                messages.success(request, 'Your account details (username/email) have been updated.')
+                return redirect('artworks:edit_profile')
+        else:
+            user_form = UserUpdateForm(instance=request.user)
+
+        if 'change_password' in request.POST:
+            password_form = PasswordChangeForm(request.user, request.POST)
+            if password_form.is_valid():
+                user = password_form.save()
+                # IMPORTANT: This keeps the user logged in after a password change
+                update_session_auth_hash(request, user)
+                messages.success(request, 'Your password was successfully updated!')
+                return redirect('artworks:edit_profile')
+            else:
+                messages.error(request, 'Please correct the error below.')
+        else:
+            password_form = PasswordChangeForm(request.user)
+
+    else: # This is for a GET request
+        profile_form = UserProfileForm(instance=user_profile)
+        user_form = UserUpdateForm(instance=request.user)
+        password_form = PasswordChangeForm(request.user)
+
     context = {
-        'form': form, 'page_title': 'Edit Your Profile & Bank Details'
+        'profile_form': profile_form,
+        'user_form': user_form,
+        'password_form': password_form,
+        'page_title': 'Edit Your Profile'
     }
     return render(request, 'artworks/edit_profile.html', context)
 
@@ -390,7 +442,6 @@ def manage_auction_registrations_view(request, artwork_slug):
 
 @login_required
 def auction_bidding_page_view(request, artwork_slug):
-    print("!!!!!!!!!! SERVER IS RUNNING THE ABSOLUTELY LATEST auction_bidding_page_view VERSION !!!!!!!!!!")
     artwork_obj = get_object_or_404(Artwork, slug=artwork_slug)
     
     # Initial status update
@@ -557,11 +608,15 @@ def auction_bidding_page_view(request, artwork_slug):
         bid_form = PlaceBidForm(initial={'bid_amount': min_next_bid.quantize(Decimal('0.01'))})
         
     time_remaining_seconds = max(0, int((effective_end_time - now).total_seconds())) if effective_end_time and now < effective_end_time else 0
+    # Calculate soft close only if effective_end_time is set
     is_soft_close_active = False 
-    if artwork.last_bid_time and effective_end_time:
-        soft_close_extension_seconds = 3 * 60
-        if (effective_end_time - artwork.last_bid_time).total_seconds() < soft_close_extension_seconds + 5 :
-             is_soft_close_active = True if (now < effective_end_time) else False
+    if effective_end_time and artwork.last_bid_time: # THIS IS THE OLD LOGIC
+        soft_close_extension_seconds = 30 # <<< CHANGED FROM 3 * 60
+        potential_soft_close_end = artwork.last_bid_time + timedelta(seconds=soft_close_extension_seconds)
+        if potential_soft_close_end > effective_end_time:
+            effective_end_time = potential_soft_close_end # Update effective_end_time for this request
+            is_soft_close_active = True
+    print(f"[DEBUG] Calculated effective_end_time for '{artwork.title}': {effective_end_time}")
     
     quick_bids = []
     if is_approved_attendee and not is_owner and min_next_bid:
@@ -637,13 +692,13 @@ def place_bid_view(request, artwork_slug):
             # And also strictly greater than any existing bid (or equal to minimum if it's the first bid)
             required_min_bid = artwork.auction_minimum_bid
             if highest_bid_obj:
-                 # A common rule: bid must be at least current_highest + a minimum increment (e.g. $1)
+                 # A common rule: bid must be at least current_highest + a minimum increment (e.g. ₺1)
                  # For simplicity now, just greater than current_highest_bid_val
                 if bid_amount <= current_highest_bid_val:
-                    messages.error(request, f"Your bid must be higher than the current highest bid of ${current_highest_bid_val:.2f}.")
+                    messages.error(request, f"Your bid must be higher than the current highest bid of {current_highest_bid_val:.2f} ₺.")
                     return redirect('artworks:auction_bidding_page', artwork_slug=artwork.slug)
             elif bid_amount < artwork.auction_minimum_bid: # First bid must meet minimum
-                 messages.error(request, f"Your first bid must be at least the minimum bid of ${artwork.auction_minimum_bid:.2f}.")
+                 messages.error(request, f"Your first bid must be at least the minimum bid of {artwork.auction_minimum_bid:.2f} ₺.")
                  return redirect('artworks:auction_bidding_page', artwork_slug=artwork.slug)
 
 
@@ -660,7 +715,7 @@ def place_bid_view(request, artwork_slug):
             artwork.last_bid_time = now
             
             # Soft close: if the bid is within X minutes of scheduled end, or after, extend the scheduled end time
-            soft_close_extension = timedelta(seconds=3 * 60) # 3 minutes
+            soft_close_extension = timedelta(seconds=30) # 30 seconds
             # Check if the current scheduled end time needs extension
             if artwork.auction_scheduled_end_time: # Ensure it's set
                 if (now + soft_close_extension) > artwork.auction_scheduled_end_time and \
@@ -677,7 +732,7 @@ def place_bid_view(request, artwork_slug):
                 'last_bid_time',
                 'auction_scheduled_end_time' # If soft close extended it
             ])
-            messages.success(request, f"Your bid of ${bid_amount:.2f} has been placed successfully!")
+            messages.success(request, f"Your bid of {bid_amount:.2f} ₺ has been placed successfully!")
             print(f"Bid of {bid_amount} by {request.user.username} PLACED on {artwork.title}") # DEBUG
 
             # --- Check if auction should end NOW (after this bid) ---
@@ -725,7 +780,7 @@ def auction_bidding_page_view(request, artwork_slug): # MODIFIED FOR FIX
     # Calculate soft close only if effective_end_time is set
     is_soft_close_active = False 
     if effective_end_time and artwork.last_bid_time:
-        soft_close_extension_seconds = 3 * 60 
+        soft_close_extension_seconds = 30 
         potential_soft_close_end = artwork.last_bid_time + timedelta(seconds=soft_close_extension_seconds)
         if potential_soft_close_end > effective_end_time:
             effective_end_time = potential_soft_close_end # Update effective_end_time for this request
@@ -952,7 +1007,7 @@ def place_bid_view(request, artwork_slug): # MODIFIED
                 return redirect('artworks:auction_bidding_page', artwork_slug=artwork_locked.slug)
 
             if bid_amount <= current_highest_bid_val:
-                messages.error(request, f"Your bid of ${bid_amount:.2f} must be higher than the current bid of ${current_highest_bid_val:.2f}.")
+                messages.error(request, f"Your bid of {bid_amount:.2f} ₺ must be higher than the current bid of {current_highest_bid_val:.2f} ₺.")
                 return redirect('artworks:auction_bidding_page', artwork_slug=artwork_locked.slug)
             # No need for artwork_locked.auction_minimum_bid check here if current_highest_bid_val already considers it.
 
@@ -968,7 +1023,7 @@ def place_bid_view(request, artwork_slug): # MODIFIED
             updated_fields_for_artwork = ['auction_current_highest_bid', 'auction_current_highest_bidder', 'last_bid_time']
 
             # Soft close logic: If the bid extends the auction
-            soft_close_extension = timedelta(seconds=3 * 60) # 3 minutes
+            soft_close_extension = timedelta(seconds=30) # 30 seconds
             new_potential_end_time = now + soft_close_extension
 
             if artwork_locked.auction_scheduled_end_time is None or new_potential_end_time > artwork_locked.auction_scheduled_end_time :
@@ -980,7 +1035,7 @@ def place_bid_view(request, artwork_slug): # MODIFIED
                  print(f"Soft close triggered by bid. New scheduled end for {artwork_locked.title}: {artwork_locked.auction_scheduled_end_time}")
             
             artwork_locked.save(update_fields=updated_fields_for_artwork)
-            messages.success(request, f"Your bid of ${bid_amount:.2f} has been placed successfully!")
+            messages.success(request, f"Your bid of {bid_amount:.2f} ₺ has been placed successfully!")
             print(f"Bid of {bid_amount} by {request.user.username} PLACED on {artwork_locked.title}")
 
             # --- Check if auction should end NOW (after this bid made it the LATEST action) ---
@@ -1007,4 +1062,23 @@ def place_bid_view(request, artwork_slug): # MODIFIED
     else:
         return redirect('artworks:artwork_detail', slug=artwork.slug)
     
+@login_required
+def view_dekont_view(request, transaction_id):
+    transaction = get_object_or_404(Transaction, id=transaction_id)
+
+    # Security Check: Only allow the buyer or seller or a superuser to view the dekont
+    if not (request.user.is_superuser or request.user == transaction.buyer or request.user == transaction.seller):
+        messages.error(request, "You do not have permission to view this file.")
+        return redirect('artworks:artwork_list')
+
+    if not transaction.dekont_data:
+        messages.error(request, "No dekont file found for this transaction.")
+        return redirect('artworks:transaction_status', transaction_id=transaction.id)
     
+    # Create an HTTP response with the binary data and the correct content type
+    response = HttpResponse(transaction.dekont_data, content_type=transaction.dekont_content_type)
+    
+    # This header tells the browser to try and display the file, not just download it
+    response['Content-Disposition'] = f'inline; filename="{transaction.dekont_filename}"'
+    
+    return response

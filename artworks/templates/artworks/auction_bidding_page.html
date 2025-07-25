@@ -8,8 +8,22 @@
 {% block extra_head %}
 <style>
     .bidding-page-container { max-width: 900px; margin: auto; }
-    .artwork-info-bidding { display: flex; gap: 20px; margin-bottom: 20px; }
-    .artwork-info-bidding img { max-width: 200px; height: auto; border-radius: 4px; }
+    .artwork-info-bidding {
+        display: flex;
+        gap: 20px;
+        margin-bottom: 20px;
+        align-items: center; /* This helps vertically align the image and text */
+    }
+    .artwork-info-bidding .image-wrapper { /* Add a new rule for a wrapper */
+        flex-basis: 200px; /* Give the image area a fixed base size */
+        flex-shrink: 0;
+        text-align: center;
+    }
+    .artwork-info-bidding img {
+        max-width: 100%; /* Image will be contained within the 200px wrapper */
+        height: auto;
+        border-radius: 4px;
+    }
     .artwork-info-bidding h2 { margin-top: 0; }
     .auction-stats { background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
     .auction-stats p { margin: 8px 0; font-size: 1.1em; }
@@ -39,15 +53,16 @@
     <a href="{% url 'artworks:artwork_detail' artwork.slug %}" class="back-link" style="display:inline-block; margin-bottom:15px;">« Back to Artwork Details</a>
 
     <div class="artwork-info-bidding">
-        {% if artwork.image_placeholder_url %}
-            <img src="{{ artwork.image_placeholder_url }}" alt="{{ artwork.title }}">
-        {% else %}
-            <img src="https://via.placeholder.com/200.png?text=No+Image" alt="No image available">
-        {% endif %}
+        <div class="image-wrapper"> {# The new wrapper div #}
+            {% if artwork.image_placeholder_url %}
+                <img src="{{ artwork.image_placeholder_url }}" alt="{{ artwork.title }}">
+            {% else %}
+                <img src="https://via.placeholder.com/200.png?text=No+Image" alt="No image available">
+            {% endif %}
+        </div>
         <div>
             <h2>{{ artwork.title }}</h2>
             <p>by {{ artwork.current_owner.username }}</p>
-            <p><em>{{ artwork.description|truncatewords:30 }}</em></p>
         </div>
     </div>
 
@@ -61,17 +76,24 @@
             <p style="color: red; font-weight: bold;">{{ auction_end_message }}</p>
         {% endif %}
          <p><span class="label">Scheduled End:</span> <span class="value">{{ effective_end_time_for_display|date:"F j, Y, P T" }}</span></p>
-        <p><span class="label">Current Highest Bid:</span> <span class="value">${{ current_highest_bid|default_if_none:artwork.auction_minimum_bid|floatformat:2 }}</span>
-            {% if current_highest_bid and current_highest_bidder %}
-                (by {{ current_highest_bidder.username }})
+        <p>
+            <span class="label">Current Highest Bid:</span> 
+            <span class="value">
+                {{ current_highest_bid|default_if_none:artwork.auction_minimum_bid|floatformat:2 }} ₺
+            </span>
+            {% comment %} --- MODIFIED LINE BELOW --- {% endcomment %}
+            {% if current_highest_bid and current_highest_bidder_username %}
+                (by {{ current_highest_bidder_username }})
+            {% elif not current_highest_bid and artwork.auction_minimum_bid %}
+                 (Starting Minimum)
             {% elif not current_highest_bid %}
-                (Minimum Bid)
+                 (No bids yet)
             {% endif %}
         </p>
-        {% if not current_highest_bid %}
-             <p><span class="label">Starting/Minimum Bid:</span> <span class="value">${{ artwork.auction_minimum_bid|floatformat:2 }}</span></p>
+        {% if not current_highest_bid and artwork.auction_minimum_bid %} {# Show starting bid clearly if no bids yet #}
+             <p><span class="label">Starting/Minimum Bid:</span> <span class="value">{{ artwork.auction_minimum_bid|floatformat:2 }} ₺</span></p>
         {% endif %}
-        <p><span class="label">Your Next Minimum Bid:</span> <span class="value">${{ min_next_bid|floatformat:2 }}</span></p>
+        <p><span class="label">Your Next Minimum Bid:</span> <span class="value">{{ min_next_bid|floatformat:2 }} ₺</span></p>
     </div>
 
     {% if is_approved_attendee and not is_owner and not auction_end_message %}
@@ -89,7 +111,7 @@
                     <form method="POST" action="{% url 'artworks:place_bid' artwork.slug %}" style="display:inline;">
                         {% csrf_token %}
                         <input type="hidden" name="bid_amount" value="{{ amount|floatformat:2 }}">
-                        <button type="submit">${{ amount|floatformat:2 }}</button>
+                        <button type="submit">{{ amount|floatformat:2 }} ₺</button>
                     </form>
                 {% endfor %}
             </div>
@@ -107,6 +129,25 @@
         <!-- We will populate this later, possibly with AJAX -->
     </div>
 </div>
+
+<!-- ====================================================================== -->
+<!-- NEW AUTO-REFRESH SCRIPT -->
+<!-- This script is separate and will simply reload the page every 15 seconds -->
+<!-- to fetch new bids from other users. -->
+<!-- ====================================================================== -->
+{% if artwork.is_auction_live_now %}
+<script>
+    // Set the refresh interval in milliseconds (15 seconds = 15000 ms)
+    const refreshInterval = 15000;
+
+    // Use setTimeout to schedule a single reload after 15 seconds.
+    // When the page reloads, this script will run again, scheduling the next reload.
+    setTimeout(function() {
+        window.location.reload();
+    }, refreshInterval);
+</script>
+{% endif %}
+
 
 {% if time_remaining_seconds > 0 and not auction_end_message %} {# Keep condition for initial script inclusion #}
 <script>

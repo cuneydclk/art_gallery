@@ -178,7 +178,7 @@
 </head>
 <body>
     <header>
-        <h1><a href="{% url 'artworks:artwork_list' %}">Art Gallery</a></h1>
+        <h1><a href="{% url 'artworks:artwork_list' %}">qtrs</a></h1>
         
         {% if user.is_authenticated %}
             <span class="welcome-message-mobile">Welcome, {{ user.username }}!</span>
@@ -190,7 +190,7 @@
         
         <nav id="main-nav">
             <ul id="main-nav-list">
-                <li><a href="{% url 'artworks:artwork_list' %}">Gallery</a></li>
+                <li><a href="{% url 'artworks:artwork_list' %}">White Cube</a></li>
                 <li><a href="{% url 'artworks:available_auctions' %}">Auctions</a></li>
                 {% if user.is_authenticated %}
                     <li class="welcome-item-in-dropdown"><span class="nav-text">Welcome, {{ user.username }}!</span></li>
@@ -229,7 +229,7 @@
     </main>
 
     <footer>
-        <p>© {% now "Y" %} My Art Gallery. All rights reserved.</p>
+        <p>© {% now "Y" %} qtrs All rights reserved.</p>
         <p><a href="{% url 'admin:index' %}" style="color: #ccc;">Admin Panel</a></p>
     </footer>
 

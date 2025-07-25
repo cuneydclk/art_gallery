@@ -7,7 +7,7 @@
 <h1>Transaction Status: {{ transaction.artwork.title }}</h1>
 
 <p><strong>Artwork:</strong> {{ transaction.artwork.title }}</p>
-<p><strong>Price:</strong> ${{ transaction.final_price }}</p>
+<p><strong>Price:</strong> {{ transaction.final_price }} ₺</p>
 <p><strong>Transaction ID:</strong> {{ transaction.id }}</p>
 <p><strong>Current Status:</strong> <strong style="color: {% if transaction.status == 'approved' %}green{% elif transaction.status == 'rejected' %}red{% else %}orange{% endif %};">{{ transaction.get_status_display }}</strong></p>
 

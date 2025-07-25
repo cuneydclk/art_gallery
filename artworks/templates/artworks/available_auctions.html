@@ -25,6 +25,13 @@
         object-fit: cover;
         border-radius: 4px;
     }
+    .auction-item-image {
+        flex-shrink: 0; /* Prevents the image container from shrinking */
+        width: 150px;   /* Give it a fixed width to center within */
+        display: flex;
+        justify-content: center; /* Center horizontally */
+        align-items: center;     /* Center vertically */
+    }
     .auction-item-details { flex-grow: 1; /* Allow details to take remaining space */ }
     .auction-item h3 { margin-top: 0; }
     .auction-item h3 a { text-decoration: none; color: #333; }
@@ -94,7 +101,7 @@
                                 </p>
                             {% endif %}
                              {% if item.artwork.auction_minimum_bid %}
-                                <p><strong>Minimum Bid:</strong> ${{ item.artwork.auction_minimum_bid }}</p>
+                                <p><strong>Minimum Bid:</strong> {{ item.artwork.auction_minimum_bid }} ₺</p>
                             {% endif %}
                         </div>
 
